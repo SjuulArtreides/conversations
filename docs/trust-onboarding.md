@@ -1,9 +1,10 @@
 # Give a browser access to your host
 
 This guide connects your own browser to the host on your machine, and then
-gives someone else's browser access to it. Every screenshot comes from a real
-local run that used synthetic accounts (`owner@example.com` and
-`guest@example.com`).
+gives someone else's browser access to it, first read-only and then with
+typing. Every screenshot comes from a real local run that used synthetic
+accounts (`owner@example.com`, `guest@example.com` and
+`teammate@example.com`).
 
 There are three separate steps, and only the last one grants anything:
 
@@ -262,6 +263,74 @@ ceiling" message.
 
 *19. Read access: the conversation is visible through your host.*
 
+### Let someone type with you
+
+To let another person type into your running sessions, trust their browser key
+with **Read session history** and **Control running terminals**.
+
+**Choose both permissions when you trust the key.** **Add person** ticks only
+**Read session history** by default. **Add permissions** on a key you already
+trusted cannot add terminal control later. So the read-only key above stays
+read-only. Trust a new browser key for typing, for example from a separate
+browser profile.
+
+In this example a teammate (`teammate@example.com`) followed the same steps as
+above: they connected to your machine and published their key, and you
+compared the full fingerprint with what they read out.
+
+1. In **Add person**, select their browser and compare the fingerprint.
+2. Tick **Control running terminals** in addition to **Read session history**.
+   Leave **Start sessions** unticked if they should only join sessions you
+   start.
+3. Tick the comparison box, then choose **Trust public key**.
+
+![Add a person with the teammate's browser selected and Read session history plus Control running terminals ticked](images/trust-onboarding/20-local-trust-teammate-control.png)
+
+*20. Trusting the teammate's key with read and terminal control.*
+
+Without **Start sessions**, their setup page shows *Needs review* with
+"Session starts are not allowed". Reading and typing still work. This differs
+from the read-only key in image 17, which has no terminal-control grant.
+
+You start a session, and both of you open it from **Private**. It is the same
+session on your machine, at the same address, in both browsers. To type, each
+person clicks the terminal; the toolbar then shows **Keyboard captured**.
+Clicking **Keyboard captured** releases the keyboard.
+
+These steps also apply to Codex, Claude and OpenCode sessions: input reaches
+the agent's existing terminal. The demo program below is only screenshot
+content, not a replacement for the agent interface.
+
+In this run, a harmless demo program echoed each line it received. The owner
+typed `owner typed this line` in their browser. Then the teammate typed
+`teammate typed this line` in theirs. Both lines reached the one program on
+the owner's machine, and both browsers show both lines with the program's
+`received:` replies.
+
+![The owner's browser showing both typed lines in the shared session](images/trust-onboarding/21-owner-view-shared-typing.png)
+
+*21. The owner's browser (`owner@example.com`): the owner typed the first
+line, the teammate the second.*
+
+![The teammate's browser showing the same session and the same two lines](images/trust-onboarding/22-teammate-view-shared-typing.png)
+
+*22. The teammate's browser (Teammate Example): the same session and the same
+two lines.*
+
+How shared typing works:
+
+- **Raw keyboard input.** Typing goes straight to the session's terminal, the
+  same as typing on your machine. It is not the chat reply box.
+- **No turn-taking.** Neither browser gets the keyboard exclusively. Your host
+  passes each browser's keystrokes to the terminal in the order they arrive.
+  If you both type at the same moment, your characters can mix, so agree who
+  types.
+- **Your machine checks every keystroke.** It accepts input only from keys
+  trusted with **Control running terminals** and refuses it from every other
+  key, including a read-only one.
+- **Revocation stops it.** Revoking the key (see
+  [Revoke access](#revoke-access)) stops their typing too.
+
 ### Host access versus session sharing
 
 **Host access** (this guide) trusts a browser key on your machine. That browser
@@ -273,8 +342,10 @@ dialog:
 - A **read-only copy** is published to the server for chosen people. They read
   it with their login, even while your host is offline, and they can never type
   into it.
-- **Write access** to one session is only for keys your host has already
-  trusted.
+- **Write access** to one session (**Allow typing**) is only for keys your
+  host has already trusted. It can't give a key more than the permissions it
+  was trusted with. A key trusted with **Control running terminals**, like the
+  teammate's above, already types in every session and doesn't need it.
 
 So sharing a session does not approve anyone's browser on your host, and host
 access is not limited to one session.
@@ -310,9 +381,9 @@ interrupted yourself.
 
 The local page marks the key **Revoked**, with *No active permissions*.
 
-![People with access with the guest's key marked Revoked](images/trust-onboarding/20-local-guest-revoked.png)
+![People with access with the guest's key marked Revoked](images/trust-onboarding/23-local-guest-revoked.png)
 
-*20. The revoked key on the host.*
+*23. The revoked key on the host.*
 
 A revoked key cannot be trusted again: the host refuses it as revoked. To
 restore access, the person creates a new browser key, for example in a new
@@ -321,13 +392,13 @@ browser profile, and you approve that key.
 On their side, the setup goes back to waiting for approval, and the
 **Private** page reports that the host refused access.
 
-![The other person's setup back to waiting for approval](images/trust-onboarding/21-guest-after-revoke.png)
+![The other person's setup back to waiting for approval](images/trust-onboarding/24-guest-after-revoke.png)
 
-*21. After revocation, the other person's browser is no longer approved.*
+*24. After revocation, the other person's browser is no longer approved.*
 
-![Your host refused access on the other person's Private page](images/trust-onboarding/22-guest-refused-after-revoke.png)
+![Your host refused access on the other person's Private page](images/trust-onboarding/25-guest-refused-after-revoke.png)
 
-*22. The other person's Private page after revocation: nothing was read.*
+*25. The other person's Private page after revocation: nothing was read.*
 
 ## Troubleshooting
 
@@ -337,9 +408,9 @@ The page keeps checking while it is open. On the machine itself, `open` and
 `start-agent` fail with *no local host is answering in …; start it with
 `conversations host`*.
 
-![Hosted setup with the machine offline](images/trust-onboarding/23-hosted-host-offline.png)
+![Hosted setup with the machine offline](images/trust-onboarding/26-hosted-host-offline.png)
 
-*23. The machine is offline.*
+*26. The machine is offline.*
 
 **An old host is still running after an upgrade.** `start-agent` fails with
 *the local host in … is too old for `start-agent`; restart it with the current
