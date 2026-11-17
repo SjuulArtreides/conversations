@@ -39,7 +39,8 @@ Run the CLI against the local server:
 
 ```sh
 cargo run -p conversations-cli -- --server http://localhost:8080 upload
-cargo run -p conversations-cli -- --server http://localhost:8080 live --host
+cargo run -p conversations-cli -- --server http://localhost:8080 host
+cargo run -p conversations-cli -- --server http://localhost:8080 start-agent claude
 ```
 
 ## Check changes

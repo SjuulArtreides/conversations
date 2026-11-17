@@ -608,10 +608,12 @@ mod tests {
                                     file_receiver: false,
                                     transfer_gate: false,
                                     effect_gate: false,
+                                    in_place: false,
                                 },
                                 local_input_bytes: 0,
                                 local_input_dropped_chunks: 0,
                             }],
+                            in_place_sessions: true,
                         },
                     )
                     .await

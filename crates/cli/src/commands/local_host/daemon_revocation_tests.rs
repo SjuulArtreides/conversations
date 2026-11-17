@@ -171,6 +171,7 @@ fn host_for(w: &World, central: &Central) -> (Arc<Host>, mpsc::Receiver<ServerMe
                 file_receiver: true,
                 transfer_gate: true,
                 effect_gate: true,
+                in_place: false,
             },
             resume_published: None,
             opencode_title_published: None,
@@ -1729,6 +1730,7 @@ fn an_older_wrapper_without_the_effect_gate_receives_no_remote_effect() {
                 file_receiver: true,
                 transfer_gate: true,
                 effect_gate: true,
+                in_place: false,
             },
         })
         .unwrap();

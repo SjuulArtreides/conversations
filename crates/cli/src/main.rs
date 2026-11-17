@@ -1,7 +1,8 @@
 //! `arrakis-conversations` — discover local Claude Code sessions and upload them
 //! to a conversations server.
 //!
-//! Subcommands: `list`, `upload`, `live`, `ping`. See `cli.rs` for flags. The HTTP
+//! Subcommands include `list`, `upload`, `start-agent`, `host` and `ping`. See
+//! `cli.rs` for flags. The HTTP
 //! client uses reqwest's blocking API; parsing and discovery come from
 //! `conversations-core`. Network/parse failures are kept per-session non-fatal
 //! during a batch upload and reported in a summary at the end.
@@ -64,7 +65,10 @@ fn main() -> ExitCode {
         Command::Mcp(mcp_args) => commands::mcp::run(&args.global, mcp_args),
         Command::List(list_args) => commands::list::run(&args.global, list_args),
         Command::Upload(upload_args) => commands::upload::run(&args.global, upload_args),
-        Command::Live(live_args) => commands::live::run(&args.global, live_args),
+        #[cfg(unix)]
+        Command::StartAgent(start_args) => {
+            commands::local_host::start_agent(&args.global, start_args)
+        }
         #[cfg(unix)]
         Command::Host(host_args) => commands::local_host::run(&args.global, host_args),
         #[cfg(unix)]

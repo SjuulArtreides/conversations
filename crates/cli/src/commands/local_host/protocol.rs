@@ -74,6 +74,12 @@ pub struct Registration {
     /// authority field, so the host sends them no remote effect at all.
     #[serde(default)]
     pub effect_gate: bool,
+    /// `start-agent`: the agent runs in the terminal it was started from, so
+    /// the host keeps it on that exact cmux surface and workspace, even the
+    /// host's own, and never moves or reorders it. Placement only; it grants
+    /// nothing.
+    #[serde(default)]
+    pub in_place: bool,
 }
 
 pub fn release_marker(dir: &std::path::Path, id: &str, pid: u32) -> PathBuf {
@@ -595,6 +601,10 @@ pub enum ServerMessage {
     Status {
         backend: Backend,
         sessions: Vec<SessionStatus>,
+        /// This host keeps [`Registration::in_place`] sessions where they
+        /// started. Hosts that predate `start-agent` omit it.
+        #[serde(default)]
+        in_place_sessions: bool,
     },
     /// Answer to `ClientMessage::WebBootstrap`: the full one-time owner link,
     /// or `None` when this host is not serving the web UI (disabled, no shared

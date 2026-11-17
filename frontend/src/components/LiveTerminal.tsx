@@ -2160,7 +2160,7 @@ export function LiveTerminal({
 
   const hint =
     conn === "connecting"
-      ? "Waiting for terminal output… (is `conversations live` running with an up-to-date CLI?)"
+      ? "Waiting for terminal output… (is `arrakis-conversations host` running with an up-to-date CLI?)"
       : conn === "error"
         ? "Live terminal unavailable for this session."
         : null;

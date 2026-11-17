@@ -1,16 +1,20 @@
 #![cfg(unix)]
-//! The real `arrakis-conversations live` multiplexer under a real terminal,
-//! against the REAL central server router. A logged-in web viewer drives every
-//! old unsigned channel the server still exposes — reply text, raw web
-//! keystrokes, resize, repaint, end, start-new, re-open, handoff and account
-//! agent settings — and the recording stub agent proves none of them reaches
-//! the local process, its terminal or its argv, while the same session keeps
-//! taking local keyboard input. A `live` session is a local host registration,
-//! so central never even lists it.
+//! The real `arrakis-conversations start-agent` under a real terminal, with a
+//! real local host, against the REAL central server router. A logged-in web
+//! viewer drives every old unsigned channel the server still exposes — reply
+//! text, raw web keystrokes, resize, repaint, end, start-new, re-open, handoff
+//! and account agent settings — and the recording stub agent proves none of
+//! them reaches the local process, its terminal or its argv, while the same
+//! session keeps taking local keyboard input. A started agent is a local host
+//! registration, so central never even lists it.
+
+#[path = "support/owned_process.rs"]
+mod owned_process;
 
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -147,6 +151,7 @@ struct Env {
     stubs: PathBuf,
     work: PathBuf,
     central: Central,
+    host: Option<owned_process::Owned>,
     output: Arc<Mutex<Vec<u8>>>,
     terminal: Option<Box<dyn Write + Send>>,
     child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
@@ -203,6 +208,7 @@ exec /usr/bin/perl -MIO::Select -MIO::Handle -e 'my $d=$ARGV[0]; my $s=IO::Selec
             stubs,
             work,
             central,
+            host: None,
             output: Arc::default(),
             terminal: None,
             child: None,
@@ -212,7 +218,57 @@ exec /usr/bin/perl -MIO::Select -MIO::Handle -e 'my $d=$ARGV[0]; my $s=IO::Selec
             "credentials.json",
             json!({"servers": {env.central.url.clone(): env.central.cookie.clone()}}),
         );
+        env.write_settings(json!({}));
         env
+    }
+
+    /// The local host settings, without the web UI: parallel tests would
+    /// contend for its port.
+    fn write_settings(&self, mut settings: Value) {
+        settings["web"] = json!({"enabled": false});
+        self.write_config("local-host.json", settings);
+    }
+
+    /// Start the user's local host in the default runtime directory and wait
+    /// until it answers.
+    fn start_host(&mut self) {
+        let root = self.home.path().canonicalize().unwrap();
+        let log = std::fs::File::create(root.join("host.log")).unwrap();
+        let mut command = Command::new(BIN);
+        command
+            .env_clear()
+            .env("HOME", &root)
+            .env("XDG_CONFIG_HOME", root.join("config"))
+            .env("XDG_DATA_HOME", root.join("data"))
+            .env("PATH", format!("{}:/usr/bin:/bin", self.stubs.display()))
+            .current_dir(&self.work)
+            .args(["--server", &self.central.url, "host"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(log);
+        self.host = Some(owned_process::Owned::spawn(&mut command));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut status = Command::new(BIN);
+            status
+                .env_clear()
+                .env("HOME", &root)
+                .env("XDG_CONFIG_HOME", root.join("config"))
+                .env("XDG_DATA_HOME", root.join("data"))
+                .current_dir(&self.work)
+                .args(["--server", &self.central.url, "host", "status"]);
+            if owned_process::run(&mut status, b"", Duration::from_secs(10))
+                .is_ok_and(|output| output.status.success())
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the host did not start: {}",
+                std::fs::read_to_string(root.join("host.log")).unwrap_or_default()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// `dirs::config_dir()` of the isolated user.
@@ -308,8 +364,8 @@ exec /usr/bin/perl -MIO::Select -MIO::Handle -e 'my $d=$ARGV[0]; my $s=IO::Selec
             .collect()
     }
 
-    /// Every process this test started: the binary, each agent stub (later
-    /// its recorder) and each stub's terminal-size sampler.
+    /// Every process this test started in the terminal: the binary, each
+    /// agent stub (later its recorder) and each stub's terminal-size sampler.
     fn owned_pids(&self) -> Vec<i32> {
         let mut pids: Vec<i32> = self.runs().into_iter().map(|(pid, _)| pid).collect();
         pids.extend(self.servers());
@@ -334,14 +390,16 @@ exec /usr/bin/perl -MIO::Select -MIO::Handle -e 'my $d=$ARGV[0]; my $s=IO::Selec
 
 impl Drop for Env {
     /// Stops what this test started without signalling any pid read from a
-    /// file: the binary is its own child, and the agent stubs stop themselves
-    /// on `stop` (bounded wait for each recorder's `done.<pid>`).
+    /// file: the binary is its own child, the host's whole process group goes
+    /// with it, and the agent stubs stop themselves on `stop` (bounded wait
+    /// for each recorder's `done.<pid>`).
     fn drop(&mut self) {
         let _ = std::fs::write(self.stubs.join("stop"), b"stop");
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+        self.host = None;
         let deadline = Instant::now() + Duration::from_secs(5);
         while self
             .runs()
@@ -385,7 +443,8 @@ fn an_unwinding_test_leaves_none_of_its_processes_running() {
     let owned = Arc::new(Mutex::new(Vec::new()));
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut env = Env::new();
-        env.run(&["live"]);
+        env.start_host();
+        env.run(&["start-agent", "claude"]);
         wait("the local agent and its sampler", &env, || {
             !env.runs().is_empty() && !env.file("samplers").is_empty()
         });
@@ -409,9 +468,10 @@ fn an_unwinding_test_leaves_none_of_its_processes_running() {
 }
 
 #[test]
-fn web_channels_cannot_reach_the_local_live_session_but_local_keys_still_do() {
+fn web_channels_cannot_reach_a_started_agent_but_local_keys_still_do() {
     let mut env = Env::new();
-    env.run(&["live"]);
+    env.start_host();
+    env.run(&["start-agent", "claude"]);
     wait("the local agent", &env, || !env.runs().is_empty());
     let (pid, argv) = env.runs()[0].clone();
     let live = argv
@@ -490,14 +550,6 @@ fn web_channels_cannot_reach_the_local_live_session_but_local_keys_still_do() {
         "web responses: {web:?}\nagent stdin: {stdin:?}\nruns: {:?}",
         env.runs()
     );
-
-    // A local `Ctrl-a c` still starts exactly one new session.
-    env.type_locally("\x01c");
-    wait("the locally started agent", &env, || env.runs().len() > 1);
-    std::thread::sleep(Duration::from_secs(1));
-    let runs = env.runs();
-    assert_eq!(runs.len(), 2, "{runs:?}");
-    assert!(runs[1].1.starts_with("claude --session-id "), "{runs:?}");
     assert!(alive(pid));
 }
 
@@ -511,28 +563,16 @@ fn central_asks_for_unsandboxed_codex(env: &Env) {
     assert_eq!(status, 200, "{body}");
 }
 
-/// Resume one checkpointed Codex session through `live --host` and return the
+/// Resume one native Codex thread with `start-agent --resume` and return the
 /// argv and selected folder, after proving it still takes local keys.
 fn host_resume_argv(local_settings: Option<Value>) -> (String, PathBuf) {
     let mut env = Env::new();
     central_asks_for_unsandboxed_codex(&env);
     if let Some(settings) = local_settings {
-        env.write_config("local-host.json", settings);
+        env.write_settings(settings);
     }
-    let session = "6c0f3f9e-3d0b-4a57-9f41-2d6c3a0e5b21";
-    env.write_config(
-        "open-sessions.json",
-        json!({"servers": {env.central.url.clone(): [{
-            "session_id": session,
-            "agent": "codex",
-            "cwd": env.work,
-            "resume_id": "native-codex-thread",
-            "agent_args": ["--sandbox", "workspace-write"],
-        }]}}),
-    );
-    env.run(&["live", "--host"]);
-    wait("the resume prompt", &env, || env.screen().contains("[Y/n]"));
-    env.type_locally("y\r");
+    env.start_host();
+    env.run(&["start-agent", "codex", "--resume", "native-codex-thread"]);
     wait("the resumed agent", &env, || !env.runs().is_empty());
     let (pid, argv) = env.runs()[0].clone();
     // The resumed session still takes local keys.
@@ -546,12 +586,12 @@ fn host_resume_argv(local_settings: Option<Value>) -> (String, PathBuf) {
 }
 
 #[test]
-fn host_resume_uses_checkpointed_agent_args_not_central_account_settings() {
+fn resume_without_local_settings_ignores_central_account_settings() {
     let (argv, work) = host_resume_argv(None);
     assert_eq!(
         argv,
         format!(
-            "codex --no-alt-screen resume native-codex-thread --sandbox workspace-write --cd {}",
+            "codex --no-alt-screen resume native-codex-thread --cd {}",
             work.display()
         ),
         "central settings became agent argv"
@@ -559,7 +599,7 @@ fn host_resume_uses_checkpointed_agent_args_not_central_account_settings() {
 }
 
 #[test]
-fn host_resume_applies_current_local_host_settings_not_central_account_settings() {
+fn resume_applies_current_local_host_settings_not_central_account_settings() {
     let local = json!({"launch": {"codex_sandbox_mode": "read-only"}});
     let (argv, work) = host_resume_argv(Some(local));
     assert_eq!(
@@ -575,22 +615,21 @@ fn host_resume_applies_current_local_host_settings_not_central_account_settings(
 fn new_local_sessions_launch_with_local_host_settings_not_central_account_settings() {
     let mut env = Env::new();
     central_asks_for_unsandboxed_codex(&env);
-    env.write_config(
-        "local-host.json",
+    env.write_settings(
         json!({"launch": {"codex_sandbox_mode": "workspace-write", "codex_approval_policy": "on-request"}}),
     );
-    env.run(&["live", "--agent", "codex"]);
-    wait("the seeded agent", &env, || !env.runs().is_empty());
+    env.start_host();
+    env.run(&["start-agent", "codex", "--", "--passthrough"]);
+    wait("the started agent", &env, || !env.runs().is_empty());
     std::thread::sleep(Duration::from_secs(1));
-    env.type_locally("\x01c");
-    wait("the Ctrl-a c agent", &env, || env.runs().len() > 1);
     let runs = env.runs();
-    let local = "--sandbox workspace-write --ask-for-approval on-request";
-    for (pid, argv) in &runs {
-        assert!(argv.starts_with("codex "), "{runs:?}");
-        assert!(argv.contains(local), "{runs:?}");
-        assert!(!argv.contains("danger-full-access"), "{runs:?}");
-        assert!(alive(*pid), "{runs:?}");
-    }
-    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let (pid, argv) = &runs[0];
+    assert!(argv.starts_with("codex "), "{runs:?}");
+    assert!(
+        argv.contains("--sandbox workspace-write --ask-for-approval on-request --passthrough"),
+        "{runs:?}"
+    );
+    assert!(!argv.contains("danger-full-access"), "{runs:?}");
+    assert!(alive(*pid), "{runs:?}");
 }

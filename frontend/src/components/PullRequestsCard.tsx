@@ -232,10 +232,6 @@ function PrRow({
           connected{" "}
           <code className="rounded bg-muted px-1 py-px text-[0.7em]">
             arrakis-conversations host
-          </code>{" "}
-          or{" "}
-          <code className="rounded bg-muted px-1 py-px text-[0.7em]">
-            live --host
           </code>
           )
         </p>

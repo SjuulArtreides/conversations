@@ -331,7 +331,7 @@ describe("SessionDetail — Pull Requests card", () => {
     // The "never synced" hint with the CLI command is shown instead.
     const hint = screen.getByTestId("pr-status-not-synced");
     expect(hint).toHaveTextContent(/status not synced/);
-    expect(hint).toHaveTextContent(/arrakis-conversations host or live --host/);
+    expect(hint).toHaveTextContent(/needs a connected arrakis-conversations host\)/);
     // No "as of" timestamp when there's no status.
     expect(screen.queryByTestId("pr-status-synced")).not.toBeInTheDocument();
   });

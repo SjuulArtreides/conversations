@@ -1,5 +1,5 @@
-//! Opt-in local daemon (`host`) and the commands that manage it. Existing
-//! `live` hosts do not use this module.
+//! The local daemon (`host`), the commands that manage it, and `start-agent`,
+//! which runs an agent in the current terminal under it.
 mod access_metadata;
 pub(crate) mod agent_link;
 pub(crate) mod authz;
@@ -36,8 +36,9 @@ pub(crate) use wrapper::peer_input;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use clap::builder::TypedValueParser as _;
 use clap::{Args, Subcommand, ValueEnum};
-use conversations_core::AgentKind;
+use conversations_core::{AgentKind, AgentLauncher};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::GlobalOpts;
@@ -117,6 +118,35 @@ pub struct HostStartup {
     /// Read the localhost session cookie from an owner-only file, without changing saved login defaults.
     #[arg(long)]
     pub cookie_file: Option<PathBuf>,
+}
+
+/// Top-level `start-agent`.
+#[derive(Debug, Args)]
+pub struct StartAgentArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    /// Agent to start.
+    #[arg(value_parser = clap::builder::PossibleValuesParser::new(["claude", "codex", "opencode"])
+        .map(|agent| agent.parse::<AgentKind>().expect("a listed agent")))]
+    pub agent: AgentKind,
+    /// Resume this native session id (a Claude or Codex session id, or an
+    /// OpenCode `ses_…` id) under its one canonical local session.
+    #[arg(long, value_name = "ID")]
+    pub resume: Option<String>,
+    /// Working directory [default: the current directory].
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
+    /// How to invoke the agent: `opencode` runs the agent's own binary, `adk`
+    /// runs OpenCode through the Arrakis dev harness (`adk code`), which needs
+    /// `ARRAKIS_HOME` and opens the monorepo root. `adk` starts OpenCode only.
+    #[arg(long, default_value_t = AgentLauncher::Opencode, env = "CONVERSATIONS_LAUNCHER")]
+    pub launcher: AgentLauncher,
+    /// Let an `adk code` session draw its tmux status strip.
+    #[arg(long)]
+    pub adk_statusline: bool,
+    /// Arguments after `--` are passed to the agent verbatim.
+    #[arg(last = true, value_name = "AGENT_ARG")]
+    pub args: Vec<String>,
 }
 
 /// Top-level `credential`.
@@ -221,15 +251,6 @@ pub enum HostCommand {
         /// No local stdin/stdout bridge (normal backend's browser-only sessions).
         #[arg(long)]
         headless: bool,
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
-    /// Start a wrapped session using the running host's launch backend.
-    Start {
-        #[arg(long, default_value_t = AgentKind::Zsh)]
-        agent: AgentKind,
-        #[arg(long)]
-        cwd: Option<PathBuf>,
         #[arg(last = true)]
         command: Vec<String>,
     },
@@ -747,38 +768,10 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
                 .await?;
                 std::process::exit(i32::try_from(code).unwrap_or(1));
             }
-            HostCommand::Start {
-                agent,
-                cwd,
-                command,
-            } => {
-                let reply = request(
-                    &dir,
-                    ClientMessage::Start {
-                        launch: protocol::Launch {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            agent: *agent,
-                            cwd: cwd
-                                .as_ref()
-                                .map(std::path::absolute)
-                                .transpose()?
-                                .unwrap_or(std::env::current_dir()?),
-                            command: default_command(*agent, command),
-                        },
-                    },
-                )
-                .await?;
-                match reply {
-                    ServerMessage::Started { id } => {
-                        println!("Started terminal {id}");
-                        Ok(())
-                    }
-                    ServerMessage::Error { message } => bail!("{message}"),
-                    _ => bail!("unexpected host response"),
-                }
-            }
             HostCommand::Status { json } => match request(&dir, ClientMessage::Status).await? {
-                ServerMessage::Status { backend, sessions } => {
+                ServerMessage::Status {
+                    backend, sessions, ..
+                } => {
                     if *json {
                         println!(
                             "{}",
@@ -1013,6 +1006,90 @@ pub fn passkey(global: &GlobalOpts, args: &PasskeyArgs) -> Result<()> {
             } => bail!("{error}"),
             other => bail!("unexpected host reply: {other:?}"),
         }
+    })
+}
+
+/// `start-agent`: run a managed agent in this terminal, registered with the
+/// running local host. It never starts a host and never opens, moves or
+/// reorders a workspace; the agent's exit code is the command's.
+pub fn start_agent(global: &GlobalOpts, args: &StartAgentArgs) -> Result<()> {
+    use crate::commands::live::host::ControlCommand;
+    if !args.launcher.supports(args.agent) {
+        bail!(
+            "`--launcher {}` launches OpenCode only; got `{}`",
+            args.launcher,
+            args.agent
+        );
+    }
+    let dir = match &args.runtime.runtime_dir {
+        Some(dir) => std::path::absolute(dir)?,
+        None => agent_link::runtime_for(&global.server),
+    };
+    let cwd = match &args.cwd {
+        Some(cwd) => std::path::absolute(cwd)?,
+        None => std::env::current_dir()?,
+    };
+    block_on(async {
+        // Nothing starts and nothing is recorded unless the host answers.
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            request(&dir, ClientMessage::Status),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "the local host in {} did not answer; start it with `arrakis-conversations host`",
+                dir.display()
+            )
+        })??;
+        match status {
+            ServerMessage::Status {
+                in_place_sessions: true,
+                ..
+            } => {}
+            // An older host would move or detach this terminal's session.
+            ServerMessage::Status { .. } => bail!(
+                "the local host in {} is too old for `start-agent`; restart it with the current \
+                 `arrakis-conversations host`",
+                dir.display()
+            ),
+            ServerMessage::Error { message } => bail!("{message}"),
+            _ => bail!("unexpected host response"),
+        }
+        let settings = settings::Settings::load(&dir)?;
+        let env = daemon::LaunchEnv::from_settings(&settings.host_env);
+        let mut agent_args = settings.launch.agent_args(args.agent)?;
+        agent_args.extend(args.args.iter().cloned());
+        let command = match &args.resume {
+            None => ControlCommand::StartNew {
+                cwd: None,
+                agent: args.agent,
+                agent_args,
+                launcher: args.launcher,
+                adk_statusline: args.adk_statusline,
+            },
+            Some(native) => {
+                let launch_cwd = daemon::local_launcher_cwd(args.launcher, &cwd, &env)?
+                    .to_string_lossy()
+                    .into_owned();
+                ControlCommand::Reopen {
+                    session_id: authz::adopt_native(&dir, args.agent, native, Some(&launch_cwd))?,
+                    cwd: launch_cwd,
+                    agent: args.agent,
+                    resume_id: Some(native.clone()),
+                    agent_args,
+                    launcher: args.launcher,
+                    adk_statusline: args.adk_statusline,
+                }
+            }
+        };
+        let mut launch = daemon::launch_from_control(command, &cwd, &env)?;
+        daemon::pin_native_executable(&mut launch, &env)?;
+        if args.agent == AgentKind::OpenCode {
+            launch.command = opencode_bridge::command(&dir, &launch.id, launch.command)?;
+        }
+        let code = wrapper::run_in_place(&dir, launch, &global.server).await?;
+        std::process::exit(i32::try_from(code).unwrap_or(1));
     })
 }
 

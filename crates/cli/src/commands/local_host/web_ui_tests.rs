@@ -74,8 +74,8 @@ fn shared_spa_headless_owner_journey() {
                 tokio::spawn(async move {
                     match read_message::<_,ClientMessage>(&mut stream).await.unwrap() {
                         ClientMessage::Status => {
-                            let sessions=[EXACT,PARTIAL].into_iter().map(|id|SessionStatus {native_session_id:None,native_identity_supported:true,readiness:None,registration:Registration {launch:Launch {id:id.into(),agent:AgentKind::Claude,cwd:"/fixture/project".into(),command:vec!["fake-agent-never-executed".into()]},workspace:None,surface:None,local_terminal:true,reconnecting:false,file_receiver:false,transfer_gate:false,effect_gate:true},local_input_bytes:0,local_input_dropped_chunks:0}).collect();
-                            write_message(&mut stream,&ServerMessage::Status {backend:Backend::Normal,sessions}).await.unwrap();
+                            let sessions=[EXACT,PARTIAL].into_iter().map(|id|SessionStatus {native_session_id:None,native_identity_supported:true,readiness:None,registration:Registration {launch:Launch {id:id.into(),agent:AgentKind::Claude,cwd:"/fixture/project".into(),command:vec!["fake-agent-never-executed".into()]},workspace:None,surface:None,local_terminal:true,reconnecting:false,file_receiver:false,transfer_gate:false,effect_gate:true,in_place:false},local_input_bytes:0,local_input_dropped_chunks:0}).collect();
+                            write_message(&mut stream,&ServerMessage::Status {backend:Backend::Normal,sessions,in_place_sessions:true}).await.unwrap();
                         }
                         ClientMessage::LocalTerminal {id} => {
                             assert!([EXACT,PARTIAL].contains(&id.as_str()));

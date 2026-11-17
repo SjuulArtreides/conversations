@@ -210,8 +210,6 @@ async def test():
     parser.add_argument("--fail-bind", action="store_true")
     parser.add_argument("--agent-exit", action="store_true")
     scenarios = parser.add_mutually_exclusive_group()
-    scenarios.add_argument("--explicit-resume-start", action="store_true",
-                           help="host start with explicit Codex resume argv must checkpoint its native identity")
     scenarios.add_argument("--host-survives-app-restart", action="store_true",
                            help="a surviving host must resume dormant panes after cmux becomes available again")
     scenarios.add_argument("--shell-reboot", action="store_true",
@@ -342,15 +340,7 @@ async def test():
             await t.wait(lambda: not json.loads(config.read_text())["servers"].get(t.url), "explicit End retired shell checkpoint")
             print("PASS: automatic shell keeps one Conversations ID and tab across two cold restarts; End retires it")
             return
-        if args.explicit_resume_start:
-            (folder / "native").write_text(str(uuid.uuid4()))
-            subprocess.run([str(t.cli), "--server", t.url, "host", "--runtime-dir",
-                            str(t.host_dir), "start", "--agent", "codex", "--cwd", str(home),
-                            "--", str(bins / "codex"), "--no-alt-screen", "resume",
-                            (folder / "native").read_text()],
-                           env=t.environment, capture_output=True, check=True, timeout=15)
-        else:
-            assert t.http("/api/live/start-new", {"agent": "codex"})["delivered"]
+        assert t.http("/api/live/start-new", {"agent": "codex"})["delivered"]
         await t.wait(lambda: t.status(), "new agent registered")
         ident = t.status()[0]["launch"]["id"]
         await t.wait(lambda: (folder / "native").exists(), "agent native identity")
@@ -360,17 +350,6 @@ async def test():
             / ("Library/Application Support" if sys.platform == "darwin" else ".config")
             / "arrakis-conversations/open-sessions.json"
         )
-        if args.explicit_resume_start:
-            await t.wait(lambda: (folder / "launches.jsonl").exists(), "explicit resume agent started")
-            launch = json.loads((folder / "launches.jsonl").read_text().splitlines()[0])
-            assert launch["native"] == native and "resume" in launch["args"], launch
-            await t.wait(
-                lambda: config.exists() and any(s["session_id"] == ident and s.get("resume_id") == native
-                    for s in json.loads(config.read_text())["servers"].get(t.url, [])),
-                "explicit host start failed to checkpoint the running agent's native resume identity",
-            )
-            print("PASS: explicit Codex resume launch persists its native checkpoint")
-            return
         await t.wait(
             lambda: t.http(f"/api/sessions/{ident}").get("agent_session_id") == native,
             "native agent identity published to Conversations",

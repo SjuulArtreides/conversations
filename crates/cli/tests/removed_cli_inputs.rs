@@ -1,5 +1,6 @@
 #![cfg(unix)]
-//! Historical `live`, `pr` and nested `host` inputs that were removed must
+//! Historical `live`, `pr`, `host start` and nested `host` inputs, and the
+//! deprecated multiplexer options on `start-agent`, that were removed must
 //! fail at argument parsing with a usage error, before the real binary starts
 //! any agent, wrapper, host or web server. None may fall through to an
 //! interactive launch.
@@ -50,6 +51,17 @@ fn removed_inputs_fail_at_parsing_before_launching_anything() {
         &["live", "--project", "work"],
         &["live", "--interactive"],
         &["live", "--complete-on-exit"],
+        &["live"],
+        &["live", "claude"],
+        &["live", "--host"],
+        &["live", "codex", "--resume", "native-codex-thread"],
+        &["host", "start"],
+        &["host", "start", "--agent", "claude"],
+        &["start-agent", "--agent", "claude"],
+        &["start-agent", "claude", "--host"],
+        &["start-agent", "claude", "--tail"],
+        &["start-agent", "claude", "--no-resume"],
+        &["start-agent", "claude", "--mirror-size", "40x120"],
         &["--uploaded-by", "someone@example.com", "list"],
         &["list", "--uploaded-by", "someone@example.com"],
         &["pr", "watch"],
@@ -62,6 +74,8 @@ fn removed_inputs_fail_at_parsing_before_launching_anything() {
         &["host", "history", "search", "x"],
         &["open", "--port", "1"],
     ];
+    // A shell is not an agent to start.
+    let invalid: &[&[&str]] = &[&["start-agent", "zsh"], &["start-agent", "bash"]];
     // Startup options belong to bare `host` only.
     let conflicting: &[&[&str]] = &[
         &["host", "--backend", "normal", "status"],
@@ -75,6 +89,7 @@ fn removed_inputs_fail_at_parsing_before_launching_anything() {
                 &["unexpected argument", "unrecognized subcommand"][..],
             )
         })
+        .chain(invalid.iter().map(|args| (args, &["invalid value"][..])))
         .chain(
             conflicting
                 .iter()

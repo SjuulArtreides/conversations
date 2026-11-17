@@ -483,6 +483,21 @@ impl Drop for ChildGuard {
 }
 
 pub async fn run(dir: &Path, launch: Launch, headless: bool, server: &str) -> Result<u32> {
+    run_with(dir, launch, headless, false, server).await
+}
+
+/// `start-agent`: wrap `launch` in this terminal and keep it in place there.
+pub async fn run_in_place(dir: &Path, launch: Launch, server: &str) -> Result<u32> {
+    run_with(dir, launch, false, true, server).await
+}
+
+async fn run_with(
+    dir: &Path,
+    launch: Launch,
+    headless: bool,
+    in_place: bool,
+    server: &str,
+) -> Result<u32> {
     let cleanup =
         (launch.agent == conversations_core::AgentKind::OpenCode).then(|| launch.id.clone());
     ensure!(!launch.command.is_empty(), "missing wrapped command");
@@ -777,6 +792,7 @@ pub async fn run(dir: &Path, launch: Launch, headless: bool, server: &str) -> Re
         file_receiver: true,
         transfer_gate: true,
         effect_gate: true,
+        in_place,
     };
     let marker = release_marker(dir, &registration.launch.id, std::process::id());
     let transfer_table = Arc::new(super::transfers::TransferTable::gated(gate.clone()));

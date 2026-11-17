@@ -44,16 +44,6 @@ impl HostOwner {
         Self::acquire_in(&root()?, server, runtime)
     }
 
-    /// One `live` multiplexer per local user and server: it owns that server's
-    /// open-session checkpoint. Independent of the host lock, so a multiplexer
-    /// runs its sessions through the local host.
-    pub(crate) fn acquire_mux(server: &str) -> Result<Self> {
-        let root = dirs::data_local_dir()
-            .context("no local data directory")?
-            .join("arrakis-conversations/mux/v1");
-        Self::acquire_in(&root, server, None)
-    }
-
     /// The runtime directory of the host that currently owns `server`, if one
     /// is running. The kernel lock decides whether it runs; the directory is
     /// the one that host recorded when it took the lock.
