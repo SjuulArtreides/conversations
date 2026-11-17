@@ -5,8 +5,6 @@
 """Isolated signed-transfer regression; no installed terminals or credentials.
 
 Managed normal/cmux hosts authorize each batch through the real signed relay.
-The legacy interactive path has no local signing authority and must reject
-unsigned transfers while keeping local terminal input usable.
 """
 import argparse
 import asyncio
@@ -77,7 +75,7 @@ class HostAuthority:
         self.key = Ed25519PrivateKey.generate()
         public = self.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.kid = b64url(hashlib.sha256(public).digest())
-        command = [str(test.cli), "host", "--runtime-dir", str(test.host_dir), "credential"]
+        command = [str(test.cli), "credential", "--runtime-dir", str(test.host_dir)]
         descriptor = subprocess.check_output(command + ["descriptor"],
             cwd=module.ROOT, env=test.environment, timeout=5, text=True).strip()
         assert descriptor.startswith("chd1."), descriptor
@@ -153,7 +151,7 @@ async def run(target, backend):
             cookie.write_text(test.cookie)
             cookie.chmod(0o600)
             host_args = [str(test.cli), "--server", test.url, "host", "--runtime-dir",
-                str(test.host_dir), "run", "--cookie-file", str(cookie), "--backend", backend]
+                str(test.host_dir), "--cookie-file", str(cookie), "--backend", backend]
             if backend == "cmux":
                 # Controlled cmux RPC fixture only. Never connect to the user's cmux socket.
                 cmux = folder / "cmux"
@@ -184,12 +182,10 @@ async def run(target, backend):
                     test.environment.update(CMUX_SURFACE_ID=f"surface-{index}",
                         CMUX_WORKSPACE_ID=f"workspace-{index}")
                 if index == 2:
-                    started = await asyncio.to_thread(subprocess.run,
-                        [str(test.cli), "--server", test.url, "host", "--runtime-dir", str(test.host_dir),
-                         "start", "--cwd", str(folder), "--", os.sys.executable, "-c", child],
-                        env=test.environment, cwd=folder, capture_output=True, timeout=20, check=True)
-                    ident = started.stdout.decode().split()[-1]
-                    uuid.UUID(ident)
+                    # A browser-only session: a wrapper with no local terminal.
+                    test.spawn([str(test.cli), "--server", "http://127.0.0.1:1", "host", "--runtime-dir",
+                        str(test.host_dir), "wrap", "--headless", "--session-id", ident, "--cwd", str(folder), "--",
+                        os.sys.executable, "-c", child], f"wrapper-{index}", stdin=subprocess.DEVNULL)
                 else:
                     master, slave = os.openpty()
                     test.fds.append(master)
@@ -336,7 +332,7 @@ async def run(target, backend):
             await test.wait(lambda: all(not path.parents[2].exists() for path in roots), "stage cleanup")
             headless_done = True
             if backend == "normal":
-                print("PASS normal host start -> headless wrapper: actual staged bytes, raw PTY paste, acknowledgement, no Enter, exit cleanup")
+                print("PASS normal headless wrapper: actual staged bytes, raw PTY paste, acknowledgement, no Enter, exit cleanup")
                 # Simulate the old wrapper wire format, which has no receiver capability.
                 old_id = str(uuid.uuid4())
                 reader, writer = await asyncio.open_unix_connection(test.host_dir / "host.sock")
@@ -368,8 +364,8 @@ async def run(target, backend):
                 print(path.name, path.read_text(errors="replace"))
             raise
         finally:
-            # `host start` owns its wrapper process, not the short-lived start client.
-            # Stop that exact fixture too if the test fails before signed session.end.
+            # Stop the headless wrapper's exact child too if the test fails before
+            # signed session.end.
             pid_file = folder / "wrapper-pid-2"
             if not headless_done and pid_file.exists():
                 pid = int(pid_file.read_text())
@@ -397,85 +393,12 @@ async def run(target, backend):
                 os.close(fd)
 
 
-async def legacy(target):
-    with tempfile.TemporaryDirectory(prefix="conversations-legacy-files-") as temporary:
-        folder = Path(temporary)
-        test = isolated_test(target, folder)
-        home = folder / "home"
-        home.mkdir()
-        test.environment.update(HOME=str(home), XDG_CONFIG_HOME=str(home),
-            CONVERSATIONS_SERVER=test.url, BIND_ADDR=test.url.removeprefix("http://"),
-            DATABASE_URL=f"sqlite://{folder}/test.db?mode=rwc", AUTH_ENABLED="false",
-            SHUTDOWN_DRAIN_SECS="0")
-        capture, ready = folder / "input", folder / "ready"
-        agent = folder / "claude"
-        agent.write_text(f"#!{os.sys.executable}\nimport os,tty\nfrom pathlib import Path\n"
-            f"tty.setraw(0)\nPath({str(ready)!r}).touch()\n"
-            f"with open({str(capture)!r},'ab',buffering=0) as f:\n"
-            " while True: f.write(os.read(0,65536))\n")
-        agent.chmod(0o700)
-        test.environment["PATH"] = str(folder) + os.pathsep + test.environment["PATH"]
-        master, slave = os.openpty()
-        module.fcntl.ioctl(slave, module.termios.TIOCSWINSZ, module.struct.pack("HHHH", 24, 80, 0, 0))
-        try:
-            test.spawn([str(test.server)], "server")
-            await test.wait(lambda: test.http("/healthz"), "legacy server")
-            live = test.spawn([str(test.cli), "--server", test.url, "live"],
-                "legacy", stdin=slave, stdout=slave, start_new_session=True)
-            os.close(slave)
-            slave = None
-            os.set_blocking(master, False)
-            async def drain_terminal():
-                while live.poll() is None:
-                    try:
-                        os.read(master, 65536)
-                    except BlockingIOError:
-                        await asyncio.sleep(.05)
-                    except OSError:
-                        return
-            drain = asyncio.create_task(drain_terminal())
-            await test.wait(ready.exists, "legacy raw agent ready")
-            sessions = await test.wait(lambda: test.http("/api/live")["live_sessions"], "legacy registration")
-            ident = sessions[0]["id"]
-            content = bytes(range(256))
-            try:
-                response = await asyncio.to_thread(test.http, f"/api/live/{ident}/files",
-                    {"files": [{"name": "legacy ü.bin", "b64": base64.b64encode(content).decode()}]})
-                raise AssertionError(f"unsigned legacy transfer was acknowledged: {response}")
-            except urllib.error.HTTPError as error:
-                assert error.code == 503 and json.loads(error.read())["code"] == "host_unavailable"
-            await asyncio.sleep(.5)
-            assert live.poll() is None, "unsigned transfer stopped the local terminal"
-            assert not capture.exists() or capture.read_bytes() == b"", "unsigned file paths reached the PTY"
-            os.write(master, b"LOCAL_STILL_WORKS")
-            await test.wait(lambda: capture.exists() and capture.read_bytes() == b"LOCAL_STILL_WORKS",
-                "local input remains usable")
-            live.send_signal(signal.SIGINT)
-            await test.wait(lambda: live.poll() is not None, "legacy teardown", timeout=20)
-            await drain
-            print("PASS legacy live/interactive: unsigned files never paste; same local terminal remains usable")
-        except Exception:
-            for path in folder.glob("*.log"):
-                print(path.name, path.read_text(errors="replace"))
-            raise
-        finally:
-            for process in reversed(test.children):
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-            os.close(master)
-            if slave is not None:
-                os.close(slave)
-            for log in test.logs:
-                log.close()
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-dir", type=Path, default=module.ROOT / "target")
-    parser.add_argument("--backend", choices=["normal", "cmux", "legacy", "all"], default="all")
+    parser.add_argument("--backend", choices=["normal", "cmux", "all"], default="all")
     args = parser.parse_args()
     if os.geteuid() == 0:
         parser.error("run as a non-root user: this test verifies staging permission failures")
-    for backend in (["normal", "cmux", "legacy"] if args.backend == "all" else [args.backend]):
-        asyncio.run(legacy(args.target_dir.resolve()) if backend == "legacy" else run(args.target_dir.resolve(), backend))
+    for backend in (["normal", "cmux"] if args.backend == "all" else [args.backend]):
+        asyncio.run(run(args.target_dir.resolve(), backend))

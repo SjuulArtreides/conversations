@@ -677,7 +677,7 @@ pub struct Recorded {
 /// Re-read recorded pull requests of `session`. Targets come ONLY from this
 /// host's own table. The background poll (`explicit=false`) only reads
 /// targets whose backoff schedule says they are due; an explicit user
-/// command (`explicit=true`, e.g. `arrakis-conversations pr sync`) reads
+/// command (`explicit=true`, e.g. `conversations pr sync`) reads
 /// every recorded target now — the manual bypass that also resets each
 /// polled target's schedule to the floor via [`apply_pr_poll_outcome`]
 /// even when metadata is unchanged.

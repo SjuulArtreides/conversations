@@ -57,7 +57,7 @@ export function startDelivery(ctx, dependencies = {}) {
     warnedRoute = undefined
     let child
     try {
-      child = spawn(env.CONVERSATIONS_CLI || "arrakis-conversations", ["mcp", "bridge", "--native-session", native], {
+      child = spawn(env.CONVERSATIONS_CLI || "conversations", ["mcp", "bridge", "--native-session", native], {
         env, stdio: ["pipe", "pipe", "pipe"],
       })
     } catch (error) { report(error); return }

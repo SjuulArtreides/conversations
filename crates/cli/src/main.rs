@@ -1,7 +1,8 @@
-//! `arrakis-conversations` — discover local Claude Code sessions and upload them
+//! `conversations` — discover local Claude Code sessions and upload them
 //! to a conversations server.
 //!
-//! Subcommands: `list`, `upload`, `live`, `ping`. See `cli.rs` for flags. The HTTP
+//! Subcommands include `list`, `upload`, `start-agent`, `host` and `ping`. See
+//! `cli.rs` for flags. The HTTP
 //! client uses reqwest's blocking API; parsing and discovery come from
 //! `conversations-core`. Network/parse failures are kept per-session non-fatal
 //! during a batch upload and reported in a summary at the end.
@@ -37,6 +38,18 @@ fn initialize_tls() {
 fn main() -> ExitCode {
     initialize_tls();
     let mut args = Cli::parse();
+    #[cfg(unix)]
+    if let Command::Host(host) = &args.command {
+        if let Some(option) = host.startup_conflict() {
+            use clap::CommandFactory;
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!("{option} starts bare `host` and cannot be used with a subcommand"),
+                )
+                .exit();
+        }
+    }
     // Resolve the effective server once, up front: an explicit `--server` /
     // `CONVERSATIONS_SERVER` wins, then the saved default server, then the
     // built-in fallback. Every subcommand reads `global.server` from here.
@@ -52,9 +65,20 @@ fn main() -> ExitCode {
         Command::Mcp(mcp_args) => commands::mcp::run(&args.global, mcp_args),
         Command::List(list_args) => commands::list::run(&args.global, list_args),
         Command::Upload(upload_args) => commands::upload::run(&args.global, upload_args),
-        Command::Live(live_args) => commands::live::run(&args.global, live_args),
+        #[cfg(unix)]
+        Command::StartAgent(start_args) => {
+            commands::local_host::start_agent(&args.global, start_args)
+        }
         #[cfg(unix)]
         Command::Host(host_args) => commands::local_host::run(&args.global, host_args),
+        #[cfg(unix)]
+        Command::Open(open_args) => commands::local_host::open(open_args),
+        #[cfg(unix)]
+        Command::Credential(credential_args) => commands::local_host::credential(credential_args),
+        #[cfg(unix)]
+        Command::Passkey(passkey_args) => commands::local_host::passkey(&args.global, passkey_args),
+        #[cfg(unix)]
+        Command::History(history_args) => commands::local_host::history(&args.global, history_args),
         Command::Login(login_args) => commands::login::run(&args.global, login_args),
         Command::Logout => commands::login::logout(&args.global),
         Command::Ping => commands::ping::run(&args.global),

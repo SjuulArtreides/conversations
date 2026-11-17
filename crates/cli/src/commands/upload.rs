@@ -1,9 +1,9 @@
-//! `arrakis-conversations upload` — discover, select, and publish sessions.
+//! `conversations upload` — discover, select, and publish sessions.
 //!
 //! Each selected session is ingested into local history (the canonical copy)
 //! and published to the server through the signed publication lifecycle, as
-//! visible to the publishing account only; `host history share` widens it and
-//! `host history unshare` withdraws it. A session id that already has legacy
+//! visible to the publishing account only; `history share` widens it and
+//! `history unshare` withdraws it. A session id that already has legacy
 //! central data is refused, and that data is left exactly as it was.
 
 use std::io::IsTerminal;
@@ -238,9 +238,7 @@ fn do_upload(global: &GlobalOpts, selected: &[&SessionFileRef]) -> Result<()> {
         selected.len()
     );
     if published > 0 {
-        println!(
-            "Widen with `host history share <id>`; withdraw with `host history unshare <id>`."
-        );
+        println!("Widen with `history share <id>`; withdraw with `history unshare <id>`.");
     }
 
     if !failures.is_empty() {

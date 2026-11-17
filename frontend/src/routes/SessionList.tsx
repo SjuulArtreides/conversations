@@ -38,7 +38,7 @@ const EMPTY_HINTS: Record<SessionScope, { title: string; message: string }> = {
   all: {
     title: "No sessions yet",
     message:
-      "Upload sessions with the arrakis-conversations CLI to see them here.",
+      "Upload sessions with the conversations CLI to see them here.",
   },
   mine: {
     title: "You haven’t uploaded any sessions",

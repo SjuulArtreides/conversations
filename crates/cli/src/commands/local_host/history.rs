@@ -853,7 +853,7 @@ pub fn render(message: &Message) -> String {
     out
 }
 
-/// Text for `host history get`.
+/// Text for `history get`.
 pub fn render_get(dir: &Path, session: &str, limit: usize, json: bool) -> Result<String> {
     let history = History::open(dir)?;
     let messages = history.messages(session, limit)?;
@@ -874,7 +874,7 @@ pub fn render_get(dir: &Path, session: &str, limit: usize, json: bool) -> Result
     Ok(out)
 }
 
-/// Text for `host history search`.
+/// Text for `history search`.
 pub fn render_search(
     dir: &Path,
     query: &str,
@@ -891,13 +891,13 @@ pub fn render_search(
         .collect())
 }
 
-/// `host history get`.
+/// `history get`.
 pub fn run_get(dir: &Path, session: &str, limit: usize, json: bool) -> Result<()> {
     print!("{}", render_get(dir, session, limit, json)?);
     Ok(())
 }
 
-/// `host history search`.
+/// `history search`.
 pub fn run_search(dir: &Path, query: &str, session: Option<&str>, limit: usize) -> Result<()> {
     print!("{}", render_search(dir, query, session, limit)?);
     Ok(())

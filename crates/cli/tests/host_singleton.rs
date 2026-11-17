@@ -27,7 +27,7 @@ fn different_runtime_directories_cannot_start_competing_hosts() {
     let home = tempfile::tempdir().unwrap();
     let start = |runtime: &str| {
         Process(
-            Command::new(env!("CARGO_BIN_EXE_arrakis-conversations"))
+            Command::new(env!("CARGO_BIN_EXE_conversations"))
                 .env_remove("CONVERSATIONS_WRAPPED")
                 .env_remove("CONVERSATIONS_WRAPPER_PID")
                 .env_remove("CONVERSATIONS_HOST_CONTROL")
@@ -39,7 +39,7 @@ fn different_runtime_directories_cannot_start_competing_hosts() {
                 .env("XDG_CONFIG_HOME", home.path().join("config"))
                 .args(["--server", "http://127.0.0.1:9", "host", "--runtime-dir"])
                 .arg(home.path().join(runtime))
-                .args(["run", "--backend", "normal"])
+                .args(["--backend", "normal"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -53,44 +53,6 @@ fn different_runtime_directories_cannot_start_competing_hosts() {
         assert!(Instant::now() < deadline, "first host did not start");
         std::thread::sleep(Duration::from_millis(20));
     }
-    // `live` multiplexes through the host already running for its server: it
-    // starts no second host of its own and leaves the owner running.
-    let mut live = Process(
-        Command::new(env!("CARGO_BIN_EXE_arrakis-conversations"))
-            .env_remove("CONVERSATIONS_WRAPPED")
-            .env_remove("CONVERSATIONS_WRAPPER_PID")
-            .env_remove("CONVERSATIONS_HOST_CONTROL")
-            .env_remove("CONVERSATIONS_HOST_DIR")
-            .env("HOME", home.path())
-            .env("XDG_DATA_HOME", home.path().join("data"))
-            .env("XDG_CONFIG_HOME", home.path().join("config"))
-            .args([
-                "--server",
-                "http://127.0.0.1:9",
-                "live",
-                "--host",
-                "--no-resume",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
-    std::thread::sleep(Duration::from_secs(2));
-    let _ = live.0.kill();
-    let _ = live.0.wait();
-    assert!(
-        !home
-            .path()
-            .join(".conversations-host-local/host.sock")
-            .exists(),
-        "live started a second host"
-    );
-    assert!(
-        first.0.try_wait().unwrap().is_none(),
-        "live stopped the host"
-    );
     assert!(std::os::unix::net::UnixStream::connect(home.path().join("one/host.sock")).is_ok());
     use std::io::Read;
     let mut second = start("two");

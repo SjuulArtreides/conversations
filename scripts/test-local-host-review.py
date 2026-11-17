@@ -56,7 +56,7 @@ async def main():
                 CONVERSATIONS_WRAPPER_PID=str(parent_wrapper.pid))
         def host():
             return test.spawn([str(test.cli), "--server", test.url, "host", "--runtime-dir",
-                str(test.host_dir), "run", "--cookie-file", str(cookie)], "host", start_new_session=True)
+                str(test.host_dir), "--cookie-file", str(cookie)], "host", start_new_session=True)
         daemon = host()
         await test.wait(lambda: (test.host_dir / "host.sock").exists(), "host ready")
         marker = folder / "child-pid"
@@ -106,7 +106,7 @@ async def main():
             for key in ("CONVERSATIONS_WRAPPED", "CONVERSATIONS_HOST_DIR", "CONVERSATIONS_WRAPPER_PID"):
                 test.environment.pop(key)
             test.spawn([str(test.cli), "--server", test.url, "host", "--runtime-dir",
-                str(parent_dir), "run", "--cookie-file", str(cookie)], "parent-host")
+                str(parent_dir), "--cookie-file", str(cookie)], "parent-host")
             await test.wait(lambda: (parent_dir / "host.sock").exists(), "parent host started")
             await asyncio.sleep(2)
             parent_status = subprocess.run([str(test.cli), "host", "--runtime-dir", str(parent_dir),

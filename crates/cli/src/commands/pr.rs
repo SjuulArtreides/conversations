@@ -1,4 +1,4 @@
-//! `arrakis-conversations pr sync` — re-read the pull requests this machine has
+//! `conversations pr sync` — re-read the pull requests this machine has
 //! been told about for a session, with the local `gh`, and push the snapshots
 //! when local intent allows it (see `local_host::github`): a private host
 //! session's PR content stays on this machine.
@@ -7,7 +7,7 @@
 //! only by signed `pr.sync` / `pr.comment` operations). A list supplied by the
 //! server is never consulted, so the server cannot make this machine read a
 //! pull request: the old server-driven sync stream and watch-targets poll were
-//! removed. Polling now runs inside `host run`.
+//! removed. Polling now runs inside `host`.
 
 use anyhow::{Context, Result};
 

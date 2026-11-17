@@ -68,7 +68,7 @@ describe("AppShell", () => {
     );
 
     expect(
-      await screen.findByLabelText("Arrakis Conversations version 0.8.1"),
+      await screen.findByLabelText("Conversations version 0.8.1"),
     ).toHaveTextContent("v0.8.1");
   });
 

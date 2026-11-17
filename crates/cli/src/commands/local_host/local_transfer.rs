@@ -191,6 +191,7 @@ mod tests {
                     file_receiver: true,
                     transfer_gate: true,
                     effect_gate: true,
+                    in_place: false,
                 },
                 resume_published: None,
                 opencode_title_published: None,

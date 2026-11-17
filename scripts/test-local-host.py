@@ -48,7 +48,7 @@ def free_port():
 class Test:
     def __init__(self, target, folder):
         self.folder = folder
-        self.cli = target / "debug/arrakis-conversations"
+        self.cli = target / "debug/conversations"
         self.server = target / "debug/conversations-server"
         self.url = f"http://127.0.0.1:{free_port()}"
         self.cookie = ""
@@ -106,13 +106,13 @@ class Test:
 
     def host(self):
         return self.spawn([str(self.cli), "--server", self.url, "host", "--runtime-dir",
-            str(self.host_dir), "run", "--cookie-file", str(self.folder / "cookie")], "host")
+            str(self.host_dir), "--cookie-file", str(self.folder / "cookie")], "host")
 
     def host_online(self):
         if self.host_id is None:
             self.host_id = subprocess.check_output(
-                [str(self.cli), "host", "--runtime-dir", str(self.host_dir),
-                 "credential", "identity"],
+                [str(self.cli), "credential", "--runtime-dir", str(self.host_dir),
+                 "identity"],
                 cwd=ROOT, env=self.environment, timeout=3, text=True,
             ).strip()
         return self.http(f"/api/host-relay/{self.host_id}/status")["online"]
@@ -157,7 +157,7 @@ class Test:
         # Hosts accept saved HTTPS origins; reject insecure remote HTTP and paths.
         for server_args in [["--server", "http://production.invalid"], ["--server", "https://production.invalid/path"]]:
             result = subprocess.run([str(self.cli), *server_args, "host", "--runtime-dir",
-                str(self.host_dir), "run"], capture_output=True, timeout=3)
+                str(self.host_dir)], capture_output=True, timeout=3)
             assert result.returncode != 0
         self.environment.update(BIND_ADDR=self.url.removeprefix("http://"),
             DATABASE_URL=f"sqlite://{self.folder}/test.db?mode=rwc", AUTH_ENABLED="true",

@@ -168,7 +168,7 @@ pub(super) struct Host {
     launch_env: LaunchEnv,
     /// The loopback management UI this host serves, when it owns its
     /// configured port. The owner rotates its one-time link over the local
-    /// socket (`host web`).
+    /// socket (`open`).
     web: Option<Arc<super::web::WebState>>,
 }
 
@@ -350,7 +350,7 @@ impl StreamState {
     }
 }
 
-/// Select a concrete backend for `host run`. `Auto` promotes to cmux only when
+/// Select a concrete backend for bare `host`. `Auto` promotes to cmux only when
 /// `workspace_id` is present, cmux is reachable, and that workspace still
 /// exists in the current tree. An inherited-but-stale `CMUX_WORKSPACE_ID`
 /// resolves to Normal rather than attaching this daemon to the wrong workspace.
@@ -537,12 +537,6 @@ pub async fn run(
     // The management UI lives and dies with the host; a running host never
     // needs a second, unmanaged process for it.
     if let Some(server) = web_server {
-        let setup = server.state();
-        jobs.spawn_blocking(move || {
-            if let Err(error) = setup.open_initial_setup() {
-                eprintln!("Local browser setup did not open: {error:#}. Set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `arrakis-conversations host web` on this machine.");
-            }
-        });
         jobs.spawn(async move {
             if let Err(error) = server.serve(std::future::pending()).await {
                 eprintln!("Local web UI stopped: {error:#}");
@@ -1458,6 +1452,7 @@ async fn handle_client(host: Arc<Host>, mut socket: tokio::net::UnixStream) -> R
                 Ok(sessions) => ServerMessage::Status {
                     backend: host.backend,
                     sessions,
+                    in_place_sessions: true,
                 },
                 Err(error) => ServerMessage::Error {
                     message: format!("could not read host status: {error:#}"),
@@ -1586,8 +1581,11 @@ async fn session(
         .ok()
         .and_then(|cred| cred.pid())
         .and_then(|pid| u32::try_from(pid).ok());
+    // A wrapper on the host's own surface is detached, unless it runs an agent
+    // started in place there.
     if std::env::var("CONVERSATIONS_WRAPPED").is_ok_and(|own| own == registration.launch.id)
         || (host.cmux.is_some()
+            && !registration.in_place
             && registration.surface.as_deref().is_some_and(|surface| {
                 std::env::var("CMUX_SURFACE_ID").is_ok_and(|own| own.eq_ignore_ascii_case(surface))
             }))
@@ -1653,12 +1651,15 @@ async fn session(
                     .as_deref()
                     .is_some_and(|current| current.eq_ignore_ascii_case(&workspace))
         });
-        if occupied || workspace.eq_ignore_ascii_case(&cmux.host_workspace) {
+        if !registration.in_place
+            && (occupied || workspace.eq_ignore_ascii_case(&cmux.host_workspace))
+        {
             workspace = cmux
                 .separate_surface(surface, &host.dir, &registration.launch)
                 .await?;
         }
-        if !registration.reconnecting
+        if !registration.in_place
+            && !registration.reconnecting
             && !authz::store::Store::open(&host.dir)?.is_open_for_restore(&id, &host.server)?
         {
             // A fresh wrapper can adopt an existing workspace. Restored sessions
@@ -1685,7 +1686,10 @@ async fn session(
                 },
             )?;
         }
-        if authz::store::Store::open(&host.dir)?.is_open_for_restore(&id, &host.server)?
+        // A start-agent session borrows its surface: whatever ran there before
+        // keeps that surface's resume binding.
+        if !registration.in_place
+            && authz::store::Store::open(&host.dir)?.is_open_for_restore(&id, &host.server)?
             && authz::lookup(&host.dir, &id)?.is_some_and(|saved| {
                 saved.resume_id.is_some() || saved.agent == conversations_core::AgentKind::Zsh
             })
@@ -2664,9 +2668,14 @@ async fn sync_resume_identity_with(
     let Some(mut saved) = authz::lookup(&host.dir, &registration.launch.id)? else {
         return Ok(());
     };
+    // An in-place session borrows its surface: it neither takes over the
+    // surface's resume binding nor reads that binding as its own identity.
+    let borrowed = registration.in_place;
     if saved.agent == conversations_core::AgentKind::Zsh {
-        cmux.bind_saved_session(&host.dir, &host.server, surface, &saved.session_id)
-            .await?;
+        if !borrowed {
+            cmux.bind_saved_session(&host.dir, &host.server, surface, &saved.session_id)
+                .await?;
+        }
         if let Some(session) = host.sessions.lock().unwrap().get_mut(&saved.session_id) {
             session.resume_published = Some(saved.session_id);
         }
@@ -2686,6 +2695,8 @@ async fn sync_resume_identity_with(
             };
         let native = if let Some(native) = probed {
             native
+        } else if borrowed {
+            return Ok(());
         } else {
             let Some(binding) = cmux.resume_binding(surface).await? else {
                 return Ok(());
@@ -2705,8 +2716,10 @@ async fn sync_resume_identity_with(
         saved.resume_id = Some(native);
     }
     if let Some(native) = &saved.resume_id {
-        cmux.bind_saved_session(&host.dir, &host.server, surface, &saved.session_id)
-            .await?;
+        if !borrowed {
+            cmux.bind_saved_session(&host.dir, &host.server, surface, &saved.session_id)
+                .await?;
+        }
         if let Some(session) = host.sessions.lock().unwrap().get_mut(&saved.session_id) {
             session.resume_published = Some(native.clone());
         }
@@ -4047,7 +4060,11 @@ async fn await_opencode_handoff(
     })
 }
 
-fn launch_from_control(command: ControlCommand, cwd: &Path, env: &LaunchEnv) -> Result<Launch> {
+pub(super) fn launch_from_control(
+    command: ControlCommand,
+    cwd: &Path,
+    env: &LaunchEnv,
+) -> Result<Launch> {
     launch_from_control_at(command, cwd, None, env)
 }
 
@@ -4181,7 +4198,7 @@ fn launch_from_control_with_id(
             Path::new(&invocation.program),
             &env.resolve_environment(),
         )
-        .context("adk is not executable on the host PATH; restart the Conversations host from the Arrakis DevKit dev shell, or run `arrakis-conversations host configure --arrakis-home <checkout> --launcher-path <dir-with-adk>`")?;
+        .context("adk is not executable on the host PATH; restart the Conversations host from the Arrakis DevKit dev shell, or run `conversations host configure --arrakis-home <checkout> --launcher-path <dir-with-adk>`")?;
         invocation.program = program.to_string_lossy().into_owned();
     }
     let mut command = if invocation.env.is_empty() {
@@ -4221,7 +4238,7 @@ fn program_index(command: &[String]) -> usize {
     }
 }
 
-fn pin_native_executable(launch: &mut Launch, env: &LaunchEnv) -> Result<()> {
+pub(super) fn pin_native_executable(launch: &mut Launch, env: &LaunchEnv) -> Result<()> {
     use conversations_core::AgentKind;
     let index = program_index(&launch.command);
     let Some(program) = launch.command.get(index) else {
@@ -4279,7 +4296,7 @@ fn pin_native_executable(launch: &mut Launch, env: &LaunchEnv) -> Result<()> {
     Ok(())
 }
 
-fn local_launcher_cwd(
+pub(super) fn local_launcher_cwd(
     launcher: conversations_core::AgentLauncher,
     cwd: &Path,
     env: &LaunchEnv,
@@ -4348,7 +4365,7 @@ mod tests {
                 let home = PathBuf::from(std::env::var_os("HOME").unwrap());
                 let captured = std::fs::read_to_string(home.join("wrapper-args")).unwrap();
                 let mut args = crate::cli::Cli::parse_from(
-                    std::iter::once("arrakis-conversations").chain(captured.lines()),
+                    std::iter::once("conversations").chain(captured.lines()),
                 );
                 args.global.server = args
                     .global
@@ -4887,6 +4904,7 @@ else: print('{}')
                             file_receiver: false,
                             transfer_gate: false,
                             effect_gate: true,
+                            in_place: false,
                         },
                         resume_published: None,
                         opencode_title_published: None,
@@ -4961,6 +4979,7 @@ else: print('{}')
             file_receiver: false,
             transfer_gate: false,
             effect_gate: true,
+            in_place: false,
         };
         let host = Host {
             dir: root.path().into(),
@@ -5172,7 +5191,11 @@ esac
                     socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
                 }
             });
-            for scenario in ["fresh", "stalled-with-binding", "nothing-known"] {
+            // `in-place`: a start-agent session borrowing a surface whose
+            // binding belongs to whatever ran there before it.
+            for scenario in ["fresh", "stalled-with-binding", "nothing-known", "in-place-fresh", "in-place-stalled-with-binding"] {
+                let in_place = scenario.starts_with("in-place-");
+                let scenario = scenario.trim_start_matches("in-place-");
                 let id = uuid::Uuid::new_v4().to_string();
                 save_checkpoint(&home, &server, crate::open_sessions::OpenSession {
                     session_id: id.clone(),
@@ -5215,6 +5238,7 @@ esac
                     reconnecting: false,
                     file_receiver: false,
                     transfer_gate: false, effect_gate: true,
+                    in_place,
                 };
                 let host = Host {
                     dir: home.clone(),
@@ -5250,9 +5274,11 @@ esac
                 let started = std::time::Instant::now();
                 sync_resume_identity_with(&host, &cmux, &registration, &probe).await.unwrap();
                 assert!(started.elapsed() < Duration::from_secs(3), "{scenario}: {:?}", started.elapsed());
+                // A borrowed surface's binding is never this session's identity;
+                // independent native discovery still is.
                 let expected = match scenario {
                     "fresh" => Some(root),
-                    "stalled-with-binding" => Some(legacy),
+                    "stalled-with-binding" if !in_place => Some(legacy),
                     _ => None,
                 };
                 let saved = authz::sessions::restore(&home, &server).unwrap()
@@ -5272,7 +5298,8 @@ esac
                 // Native resume identity is local state: it is never published.
                 assert_eq!(published, None, "{scenario}");
                 let bound = std::fs::read_to_string(&binds).unwrap_or_default().lines().any(|line| line.contains(&format!("--checkpoint {id}")));
-                assert_eq!(bound, expected.is_some(), "{scenario}");
+                // Nor does it take over the borrowed surface's resume binding.
+                assert_eq!(bound, expected.is_some() && !in_place, "{scenario} in place: {in_place}");
                 // The next restart resumes the same native thread under the
                 // same Conversations ID, or still refuses to guess one.
                 match expected {
@@ -5381,6 +5408,7 @@ esac
                         file_receiver: true,
                         transfer_gate: true,
                         effect_gate: true,
+                        in_place: false,
                     },
                     resume_published: None,
                     opencode_title_published: None,
@@ -6211,6 +6239,7 @@ esac
                         file_receiver: false,
                         transfer_gate: false,
                         effect_gate: false,
+                        in_place: false,
                     },
                     resume_published: None,
                     // The OpenCode bridge already reported this automatic title.

@@ -304,14 +304,14 @@ async function pinnedHostOrThrow(
   }
   if (!isPinned(host) || !(await pinIsIntact(host))) {
     throw new HostControlError(
-      "This host was paired before its identity key was pinned (or its pin is damaged). Forget it and pair again with the descriptor from `host credential descriptor`.",
+      "This host was paired before its identity key was pinned (or its pin is damaged). Forget it and pair again with the descriptor from `credential descriptor`.",
       "not_paired",
     );
   }
   return host;
 }
 
-/** Complete a registration the host started locally (link from `host passkey enroll-start`). */
+/** Complete a registration the host started locally (link from `passkey enroll-start`). */
 /**
  * Create the passkey and have the host finish the registration. The returned
  * id is derived HERE from the authenticator's own output, and is returned only

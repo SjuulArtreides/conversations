@@ -185,11 +185,15 @@ pub(crate) fn prepare(command: &str, args: &mut Vec<String>) -> Result<()> {
         }
     };
     let registration = &config["mcpServers"]["conversations"];
+    // Registrations made before the executable was renamed still name a
+    // working `arrakis-conversations` install.
     let registered = registration["command"].as_str().is_some_and(|command| {
-        Path::new(command)
-            .file_name()
-            .and_then(|name| name.to_str())
-            == Some("arrakis-conversations")
+        matches!(
+            Path::new(command)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("conversations" | "arrakis-conversations")
+        )
     }) && registration["args"].as_array().is_some_and(|args| {
         args.windows(2)
             .any(|pair| pair[0] == "mcp" && pair[1] == "serve")

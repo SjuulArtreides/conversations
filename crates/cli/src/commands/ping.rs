@@ -1,4 +1,4 @@
-//! `arrakis-conversations ping` — probe the server's /healthz endpoint.
+//! `conversations ping` — probe the server's /healthz endpoint.
 
 use anyhow::Result;
 

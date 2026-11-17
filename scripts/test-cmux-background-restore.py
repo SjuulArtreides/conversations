@@ -16,7 +16,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--cli', type=Path, default=ROOT / 'target/release/arrakis-conversations')
+parser.add_argument('--cli', type=Path, default=ROOT / 'target/release/conversations')
 args = parser.parse_args()
 CMUX = os.environ.get('CMUX_BUNDLED_CLI_PATH', '/Applications/cmux.app/Contents/Resources/bin/cmux')
 

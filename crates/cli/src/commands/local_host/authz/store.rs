@@ -1,7 +1,7 @@
 //! The host's local authority database (`authz.db` in the private runtime
 //! directory): host identity, locally enrolled credentials, grants, and the
 //! durable replay/idempotency journal. Credentials and grants are written only
-//! by local callers (`host credential …`); no code path accepts them from a
+//! by local callers (`credential …`); no code path accepts them from a
 //! remote frame.
 
 use std::os::fd::AsRawFd;
@@ -1292,7 +1292,7 @@ impl Store {
     /// immediate transaction on `authz.db`: `deliver` runs only while `op`
     /// still rests on exactly the authority it was admitted under, and holding
     /// the database write lock across it orders it against every authority
-    /// change committed by ANY process (the host, `host credential revoke`, a
+    /// change committed by ANY process (the host, `credential revoke`, a
     /// grant change from the CLI): a change committed first is seen here and the
     /// reply is withheld; a change attempted meanwhile waits until the reply is
     /// handed off. `deliver` must not block on anything else (no awaits); it is

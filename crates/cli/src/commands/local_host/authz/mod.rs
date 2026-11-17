@@ -5,7 +5,7 @@
 //!
 //! Authority is re-checked at the final local effect, not only at admission:
 //! queued work carries the exact authority it was admitted under and stops
-//! once a local revocation (`host credential revoke`, signed `grant.remove`)
+//! once a local revocation (`credential revoke`, signed `grant.remove`)
 //! commits. See [`cutover`]. Not
 //! gated by signed authority here: same-machine handoff, MCP-to-PTY, legacy
 //! `live --host` and central uploads.
@@ -29,7 +29,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use envelope::Alg;
 use store::{Grant, Kind, Store};
 
-/// `host credential add`: locally approve a key. Reaching this function is the
+/// `credential add`: locally approve a key. Reaching this function is the
 /// local-approval step (it needs write access to the host's private runtime
 /// directory), including the owner-authenticated loopback management UI.
 pub fn enroll_from_cli(

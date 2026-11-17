@@ -19,7 +19,7 @@ spec.loader.exec_module(fixture)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cli', type=Path, default=Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')) / 'debug/arrakis-conversations')
+    parser.add_argument('--cli', type=Path, default=Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')) / 'debug/conversations')
     args = parser.parse_args()
     (ROOT / 'tmp').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='claude-channel-', dir=ROOT / 'tmp') as folder:

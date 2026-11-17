@@ -12,7 +12,7 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--target-dir", type=Path, default=root / "target")
 args = parser.parse_args()
-cli = args.target_dir.resolve() / "debug/arrakis-conversations"
+cli = args.target_dir.resolve() / "debug/conversations"
 (root / "tmp").mkdir(exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="host-settings-", dir=root / "tmp") as scratch:
     folder = Path(scratch)

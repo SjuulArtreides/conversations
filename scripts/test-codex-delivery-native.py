@@ -64,7 +64,7 @@ def answered(history, key, marker):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex", type=Path)
-    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/arrakis-conversations")
+    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/conversations")
     parser.add_argument("--shared", action="store_true", help="create only a new owned thread on the existing shared daemon")
     args = parser.parse_args()
     codex = args.codex or Path.home() / ".npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"

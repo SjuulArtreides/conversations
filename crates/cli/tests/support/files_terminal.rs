@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 const SESSION: &str = "5b0c7a52-93d4-4c61-8f0e-2a6c1d7e4f10";
 const SESSION_B: &str = "c4e2a9d1-0b7f-4e38-a5d6-91f3b2c8e702";
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 /// Printed by the agent when it starts: only in the terminal's snapshot.
 const SCREEN_MARK: &str = "screenmarkhackberry";
 /// Printed later: a terminal update.
@@ -171,7 +171,7 @@ finally:
             .command()
             .args(["--server", &self.central, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .env("CONVERSATIONS_TEST_DELIVERY_BARRIER", &self.barrier)
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -206,9 +206,9 @@ finally:
     fn id(&self) -> String {
         let output = self
             .command()
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["credential", "identity"])
+            .arg("identity")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -239,10 +239,9 @@ finally:
     fn enroll(&self, alg: &str, public_key: &str, grants: &[String]) -> String {
         let mut command = self.command();
         command
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
             .args([
-                "credential",
                 "add",
                 "--kind",
                 "owner",

@@ -1,7 +1,7 @@
 #![cfg(unix)]
 //! Files, images and the terminal over the private browser <-> host channel,
 //! end to end on loopback: the REAL central server (router, relay, SQLite) in
-//! process, the REAL `arrakis-conversations` host binary with its normal
+//! process, the REAL `conversations` host binary with its normal
 //! backend and wrapper, and a REAL headless Chromium running the production
 //! `privateChannel.ts` (type-stripped by Node, not rebuilt). The coding agent is
 //! a recording stub that also prints to its terminal. TURN is a loopback

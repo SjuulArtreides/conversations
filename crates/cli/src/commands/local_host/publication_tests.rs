@@ -1159,6 +1159,7 @@ fn attach_terminal(host: &Host) -> mpsc::Receiver<ServerMessage> {
                 file_receiver: true,
                 transfer_gate: true,
                 effect_gate: true,
+                in_place: false,
             },
             resume_published: None,
             opencode_title_published: None,
@@ -1546,6 +1547,7 @@ fn a_growing_transcript_is_followed_locally_while_central_is_down_and_leaves_onl
             file_receiver: true,
             transfer_gate: true,
             effect_gate: true,
+            in_place: false,
         };
         let follow = tokio::spawn(transcript_loop(host.clone(), registration));
         let mut agent = OwnedAgent::spawn(

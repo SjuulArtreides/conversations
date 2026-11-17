@@ -36,7 +36,7 @@ def main():
     runtime = sandbox / "host"
     runtime.mkdir(exist_ok=True, mode=0o700)
     url = f"http://127.0.0.1:{args.port}"
-    cli = target / "debug/arrakis-conversations"
+    cli = target / "debug/conversations"
     server = target / "debug/conversations-server"
     if not cli.is_file() or not server.is_file() or not (root / "frontend/dist/index.html").is_file():
         raise SystemExit("Build conversations-cli, conversations-server and frontend first; see DEVELOPMENT.md")
@@ -99,7 +99,7 @@ def main():
             with open(cookie_file, "w", opener=lambda p, f: os.open(p, f, 0o600)) as output:
                 output.write(cookie)
             command = [str(cli), "--server", url, "host", "--runtime-dir", str(runtime),
-                       "run", "--backend", args.backend or "cmux", "--cookie-file", str(cookie_file)]
+                       "--backend", args.backend or "cmux", "--cookie-file", str(cookie_file)]
             launch = sandbox / "start-host.sh"
             launch.write_text("#!/bin/sh\ncd " + shlex.quote(str(root)) + "\nexec " + shlex.join(command) + "\n")
             launch.chmod(0o700)

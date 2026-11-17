@@ -9,7 +9,7 @@ import { clearHostNetwork } from "./hostNetwork";
 /**
  * Hosts this browser has been told to trust. A pairing pins BOTH the host's
  * public identity key and its id (the hash of that key). They come from a
- * descriptor the user copied from their own machine (`host credential
+ * descriptor the user copied from their own machine (`credential
  * descriptor`, or the enrollment link), never from the server or an account
  * lookup. Everything the host says is verified against the pinned key, so the
  * relay cannot substitute another host. Entries saved before keys were pinned

@@ -1,6 +1,6 @@
-//! `arrakis-conversations live` — the local multiplexer.
+//! Shared agent launch, transcript and terminal helpers for host sessions.
 //!
-//! The byte-level line framing its sessions use to follow their transcripts
+//! The byte-level line framing sessions use to follow their transcripts
 //! lives in [`Tailer`], a pure, unit-testable type that turns raw appended
 //! bytes into complete `core::Message`s while correctly buffering partial
 //! lines (including multi-byte UTF-8 sequences split across a poll tick) and
@@ -13,32 +13,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use conversations_core::{parse_line, Message};
 
-use crate::cli::{GlobalOpts, LiveArgs};
-
 pub(crate) mod availability;
 pub(crate) mod host;
 pub(crate) mod interactive;
-mod local;
-mod mux;
 pub(crate) mod terminal_files;
-
-pub fn run(global: &GlobalOpts, args: &LiveArgs) -> Result<()> {
-    // A launcher only ever wraps the agent it was built for, so reject the
-    // mismatch here rather than spawning `adk code` and then following a store
-    // it will never write to.
-    if !args.launcher.supports(args.agent) {
-        anyhow::bail!(
-            "`--launcher {}` launches OpenCode only; got `--agent {}`",
-            args.launcher,
-            args.agent
-        );
-    }
-    // `live` is the local multiplexer: unless `--host` is set it seeds the
-    // user's own local agent as the first child; `--host` instead resumes the
-    // checkpointed sessions. Neither takes commands from the web. The branching
-    // lives in `host::run`.
-    host::run(global, args)
-}
 
 /// Decode a buffer of complete JSONL bytes into chat messages, tolerantly
 /// skipping blank / malformed / non-message lines.

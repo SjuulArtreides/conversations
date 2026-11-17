@@ -68,7 +68,7 @@ export function Login() {
           💬
         </div>
         <h1 className="text-xl font-semibold tracking-tight">
-          Arrakis Conversations
+          Conversations
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Sign in to view and share Claude Code sessions.

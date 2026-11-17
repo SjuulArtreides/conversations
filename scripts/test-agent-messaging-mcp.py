@@ -97,7 +97,7 @@ class ManagedHost:
         self.runtime.mkdir(mode=0o700)
         self.environment = dict(environment, CONVERSATIONS_HOST_DIR=str(self.runtime))
         self.registrations = {}
-        self.child = subprocess.Popen([str(cli), "--server", origin, "host", "run", "--backend", "normal"],
+        self.child = subprocess.Popen([str(cli), "--server", origin, "host", "--backend", "normal"],
             env=self.environment, stdout=log, stderr=log, cwd=scratch)
         try:
             self.wait(lambda: (self.runtime / "host.sock").exists(), "host socket")
@@ -127,7 +127,7 @@ class ManagedHost:
         self.wait(online, "signed host relay")
 
     def credential(self, *args):
-        return subprocess.check_output([str(self.cli), "host", "credential", *args],
+        return subprocess.check_output([str(self.cli), "credential", *args],
             env=self.environment, text=True, stderr=subprocess.PIPE, timeout=10)
 
     def status(self):
@@ -177,7 +177,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-dir", type=Path, default=ROOT / "target")
     args = parser.parse_args()
-    cli = args.target_dir.resolve() / "debug/arrakis-conversations"
+    cli = args.target_dir.resolve() / "debug/conversations"
     server = args.target_dir.resolve() / "debug/conversations-server"
     (ROOT / "tmp").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="messaging-mcp-", dir=ROOT / "tmp") as folder:

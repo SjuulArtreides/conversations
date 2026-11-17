@@ -69,7 +69,7 @@ export default function App() {
         <div className="space-y-4">
           <ErrorState
             title="Connect this browser once"
-            message="Run arrakis-conversations host web on this laptop to open an authorized browser tab. This browser will then remember access across restarts."
+            message="Run conversations open on this laptop to open an authorized browser tab. This browser will then remember access across restarts."
             onRetry={() => void refreshLocalHost()}
           />
           {host.error && (

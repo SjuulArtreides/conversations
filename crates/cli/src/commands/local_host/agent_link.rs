@@ -3,9 +3,9 @@
 //!
 //! Identity: this host owns one Ed25519 AGENT key (separate from the host
 //! identity key, kept in `authz.db`). The receiving host's owner approves its
-//! public key ONCE with `host credential add --kind agent` and grants it
+//! public key ONCE with `credential add --kind agent` and grants it
 //! `session.write:<recipient session>` per session. Where a message goes comes
-//! only from `agent_targets`, which the local user fills with `host credential
+//! only from `agent_targets`, which the local user fills with `credential
 //! pair-peer` from the recipient's own descriptor; central discovery never writes
 //! it. The recipient host's reply is verified against that pinned key.
 
@@ -50,7 +50,7 @@ fn open(dir: &Path) -> Result<Store> {
 }
 
 /// `(standard-base64 public key, key id)` of this host's agent key, to approve on
-/// the recipient with `host credential add --kind agent --public-key …`.
+/// the recipient with `credential add --kind agent --public-key …`.
 pub fn agent_public(dir: &Path) -> Result<(String, String)> {
     let (_, public) = open(dir)?.agent_key()?;
     Ok((STANDARD.encode(&public), key_id(&public)))
@@ -68,7 +68,7 @@ pub fn pair_peer(dir: &Path, descriptor: &str, session: &str, label: &str) -> Re
     );
     let key = descriptor
         .strip_prefix(HOST_DESCRIPTOR_PREFIX)
-        .context("not a host descriptor (expected `chd1.…` from `host credential descriptor`)")?;
+        .context("not a host descriptor (expected `chd1.…` from `credential descriptor`)")?;
     let key = B64.decode(key).context("descriptor is not base64url")?;
     ensure!(key.len() == 32, "descriptor key must be 32 bytes");
     let host_id = key_id(&key);
@@ -301,7 +301,7 @@ pub fn begin_send(
     let (host_id, host_key, _) = store.target(target)?.with_context(|| {
         format!(
             "recipient {target} is not paired on this machine. Pair it with \
-             `host credential pair-peer --host <descriptor> --session {target} --label <name>`; \
+             `credential pair-peer --host <descriptor> --session {target} --label <name>`; \
              discovery results are not trusted to choose a destination"
         )
     })?;

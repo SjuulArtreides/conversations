@@ -371,7 +371,7 @@ pub enum Operation {
         launch: LaunchUpdate,
     },
     /// Host-scoped, owner-only: begin a passkey enrollment ceremony on this
-    /// host, exactly as the local `host passkey enroll-start` does, and get the
+    /// host, exactly as the local `passkey enroll-start` does, and get the
     /// invite link to hand to the person being invited. The registration still
     /// waits for `PasskeyApprove`; nothing here trusts anything yet.
     PasskeyEnrollStart {

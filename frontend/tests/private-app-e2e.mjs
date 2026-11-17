@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Built-SPA journey for local-first private sessions, end to end on loopback:
 // the REAL `conversations-server` binary serving the BUILT SPA (auth on, fresh
-// SQLite), the REAL `arrakis-conversations` host binary (normal backend, fresh
+// SQLite), the REAL `conversations` host binary (normal backend, fresh
 // HOME/runtime/settings), and a REAL headless Chromium driven over CDP with a
 // virtual WebAuthn authenticator. Only the coding agent is a recording stub.
 //
@@ -46,7 +46,7 @@ const CHROME = env("PRIVATE_APP_CHROME");
 const BIN_DIR = env("PRIVATE_APP_BIN_DIR");
 const DIST = env("PRIVATE_APP_DIST");
 const ROOT = env("PRIVATE_APP_ROOT");
-const HOST_BIN = path.join(BIN_DIR, "arrakis-conversations");
+const HOST_BIN = path.join(BIN_DIR, "conversations");
 const SERVER_BIN = path.join(BIN_DIR, "conversations-server");
 const SQLITE3 = process.env.PRIVATE_APP_SQLITE3 ?? "/usr/bin/sqlite3";
 const OVERALL_TIMEOUT_MS = Number(

@@ -188,7 +188,7 @@ it("updates a waiting browser name explicitly and gives a copyable owner approva
     screen.getByText("Terminal approval instructions", { selector: "summary" }),
   );
   const command = screen.getByText(
-    /^arrakis-conversations host credential add/,
+    /^conversations credential add/,
   ).textContent!;
   expect(command).toContain("--public-key BAECAw==");
   expect(command).toContain(`--label 'Work'"'"'s $(echo never)'`);

@@ -1,7 +1,7 @@
 #![cfg(unix)]
 //! The private browser <-> host channel, end to end on loopback, with nothing
 //! stubbed between the parts that matter: the REAL central server (router,
-//! relay, SQLite) in process, the REAL `arrakis-conversations` host binary with
+//! relay, SQLite) in process, the REAL `conversations` host binary with
 //! its normal backend and wrapper, and a REAL headless Chromium running the
 //! production `privateChannel.ts` helper (type-stripped by Node, not rebuilt).
 //! The coding agent is a recording stub. TURN is a loopback node-turn.
@@ -38,7 +38,7 @@ use serde_json::{json, Value};
 
 const SESSION: &str = "5b0c7a52-93d4-4c61-8f0e-2a6c1d7e4f10";
 const SESSION_B: &str = "c4e2a9d1-0b7f-4e38-a5d6-91f3b2c8e702";
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 /// In every transcript the stub agent writes (so it reaches local history).
 const TRANSCRIPT_MARK: &str = "transcriptmarkzebrawood";
 /// Added later to an ALREADY STORED message (same uuid, same seq): a reader
@@ -178,7 +178,7 @@ finally:
             .command()
             .args(["--server", &self.central, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .env("CONVERSATIONS_TEST_DELIVERY_BARRIER", &self.barrier)
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -213,9 +213,9 @@ finally:
     fn id(&self) -> String {
         let output = self
             .command()
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["credential", "identity"])
+            .arg("identity")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -246,10 +246,9 @@ finally:
     fn enroll(&self, alg: &str, public_key: &str, grants: &[String]) -> String {
         let mut command = self.command();
         command
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
             .args([
-                "credential",
                 "add",
                 "--kind",
                 "owner",
@@ -293,9 +292,9 @@ finally:
 
     fn revoke_credential(&self, kid: &str) -> Child {
         self.command()
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["credential", "revoke", kid, "--json"])
+            .args(["revoke", kid, "--json"])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()

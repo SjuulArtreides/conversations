@@ -74,6 +74,12 @@ pub struct Registration {
     /// authority field, so the host sends them no remote effect at all.
     #[serde(default)]
     pub effect_gate: bool,
+    /// `start-agent`: the agent runs in the terminal it was started from, so
+    /// the host keeps it on that exact cmux surface and workspace, even the
+    /// host's own, and never moves or reorders it. Placement only; it grants
+    /// nothing.
+    #[serde(default)]
+    pub in_place: bool,
 }
 
 pub fn release_marker(dir: &std::path::Path, id: &str, pid: u32) -> PathBuf {
@@ -405,7 +411,7 @@ pub enum ClientMessage {
         outcome: CancelOutcome,
     },
     /// Sent on the owner-only host socket after a local authority change was
-    /// committed (`host credential revoke`). It carries no authority: the host
+    /// committed (`credential revoke`). It carries no authority: the host
     /// re-reads its own database and interrupts interactions whose authority no
     /// longer holds.
     AuthorityChanged,
@@ -595,6 +601,10 @@ pub enum ServerMessage {
     Status {
         backend: Backend,
         sessions: Vec<SessionStatus>,
+        /// This host keeps [`Registration::in_place`] sessions where they
+        /// started. Hosts that predate `start-agent` omit it.
+        #[serde(default)]
+        in_place_sessions: bool,
     },
     /// Answer to `ClientMessage::WebBootstrap`: the full one-time owner link,
     /// or `None` when this host is not serving the web UI (disabled, no shared
@@ -844,7 +854,7 @@ mod tests {
         let uid = unsafe { libc::geteuid() };
         let ps = fake_ps(
             dir.path(),
-            &format!("echo '{uid} 4242 arrakis-conversations host --runtime-dir /r wrap --session-id {id} --cwd /'"),
+            &format!("echo '{uid} 4242 conversations host --runtime-dir /r wrap --session-id {id} --cwd /'"),
         );
         let timeout = std::time::Duration::from_secs(5);
         assert_eq!(
@@ -891,7 +901,7 @@ mod tests {
     fn a_wrapper_without_a_liveness_lock_is_found_by_its_launch_argv() {
         let id = "5f0c1a52-7e0f-4c5b-9d7e-2a6f1c3b8e41";
         let wrapper = format!(
-            "  501  4242 /usr/local/bin/arrakis-conversations host --runtime-dir /run/a b wrap --session-id {id} --cwd /repo --agent claude -- claude --session-id {id}"
+            "  501  4242 /usr/local/bin/conversations host --runtime-dir /run/a b wrap --session-id {id} --cwd /repo --agent claude -- claude --session-id {id}"
         );
         assert_eq!(wrappers_in_process_list(&wrapper, "501", id), vec![4242]);
         assert!(
@@ -901,7 +911,7 @@ mod tests {
         // The agent carries the same ID but is not a wrapper.
         let agent = format!("501 4243 claude --session-id {id}");
         assert!(wrappers_in_process_list(&agent, "501", id).is_empty());
-        let other = "501 4244 arrakis-conversations host wrap --session-id 00000000-0000-4000-8000-000000000000 --cwd /";
+        let other = "501 4244 conversations host wrap --session-id 00000000-0000-4000-8000-000000000000 --cwd /";
         assert!(wrappers_in_process_list(other, "501", id).is_empty());
     }
 

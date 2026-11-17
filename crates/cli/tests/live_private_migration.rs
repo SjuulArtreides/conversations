@@ -1,17 +1,21 @@
 #![cfg(unix)]
-//! Ordinary `live`, `live --host` and `upload`, as real
-//! processes against the REAL central server router (every request recorded),
-//! in an isolated user. A stub `claude` writes its transcript in Claude's own
-//! format and, when told to locally, asks for a handoff through the real
-//! in-harness MCP server, exactly as an agent does.
+//! `start-agent`, `start-agent --resume` and `upload`, as real processes
+//! against the REAL central server router (every request recorded), in an
+//! isolated user. A stub `claude` writes its transcript in Claude's own format
+//! and, when told to locally, asks for a handoff through the real in-harness
+//! MCP server, exactly as an agent does.
 //!
-//! What must hold: each mux session is a canonical local host registration
-//! (`host status`), its history is in the local history database, local keys,
-//! `Ctrl-a c` and the in-harness handoff keep working, and nothing private —
-//! transcript text, typed keys, the handoff brief or the working directory —
-//! reaches central, in a request or in its database. `upload` publishes through
-//! the signed publication lifecycle, never the legacy upload, and refuses a
-//! session id that already has legacy central data, leaving that data as it was.
+//! What must hold: each started agent is a canonical local host registration
+//! (`host status`), its history is in the local history database, local keys
+//! and the in-harness handoff keep working, a resumed native session keeps its
+//! one canonical record, and nothing private — transcript text, typed keys,
+//! the handoff brief or the working directory — reaches central, in a request
+//! or in its database. `upload` publishes through the signed publication
+//! lifecycle, never the legacy upload, and refuses a session id that already
+//! has legacy central data, leaving that data as it was.
+
+#[path = "support/owned_process.rs"]
+mod owned_process;
 
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -26,7 +30,7 @@ use conversations_server::{build_router_with_auth, AppState, Config, SqliteRepo}
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::{json, Value};
 
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 const ALICE: &str = "alice@example.com";
 /// Written by the agent into its transcript only.
 const TRANSCRIPT_MARK: &str = "transcriptmarkwolfsbane";
@@ -324,6 +328,8 @@ struct Env {
     /// Runtime directory of the host the sessions are expected in; `None` is
     /// the default `~/.conversations-host-local`.
     runtime: Option<PathBuf>,
+    /// The user's local host, once started.
+    host: Option<owned_process::Owned>,
     _pty: Option<Box<dyn portable_pty::MasterPty + Send>>,
 }
 
@@ -350,17 +356,23 @@ impl Env {
         // a local handoff through the real MCP server named by its wrapper,
         // as an agent's harness does. It stops on its own once the test
         // writes `stop` (or its directory is gone) and reports `done.<pid>`.
-        write_executable(
-            &stubs.join("claude"),
-            &format!(
-                r#"#!/bin/sh
-echo "$$ ${{CONVERSATIONS_WRAPPED:--}} claude $*" >> "{stubs}/runs"
+        // The OpenCode stub fails the bridge's version probe, so the bridge
+        // starts it as given, and every subcommand probe such as `db path`:
+        // it has no database of its own.
+        for agent in ["claude", "opencode"] {
+            write_executable(
+                &stubs.join(agent),
+                &format!(
+                    r#"#!/bin/sh
+[ "$1" = --version ] && exit 1
+[ "{agent}" = opencode ] && case "$1" in -*) ;; *) exit 1 ;; esac
+echo "$$ ${{CONVERSATIONS_WRAPPED:--}} {agent} $*" >> "{stubs}/runs"
 id=""; prev=""
 for a in "$@"; do
   case "$prev" in --session-id|--resume) id="$a";; esac
   prev="$a"
 done
-if [ -n "$id" ]; then
+if [ "{agent}" = claude ] && [ -n "$id" ]; then
   dir="$HOME/.claude/projects/$(pwd -P | /usr/bin/tr './' '--')"
   /bin/mkdir -p "$dir"
   printf '%s\n' '{{"type":"user","uuid":"'"$id"'-u1","sessionId":"'"$id"'","timestamp":"2026-11-02T10:00:00.000Z","message":{{"role":"user","content":"neutral opener"}}}}' >> "$dir/$id.jsonl"
@@ -392,9 +404,10 @@ while (-d $d && !-e "$d/stop") {{
 if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 ' "{stubs}"
 "#,
-                stubs = stubs.display()
-            ),
-        );
+                    stubs = stubs.display()
+                ),
+            );
+        }
         let central = Central::start(&root);
         let env = Self {
             home,
@@ -405,6 +418,7 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
             terminal: None,
             child: None,
             runtime: None,
+            host: None,
             _pty: None,
         };
         env.write_config(
@@ -444,9 +458,10 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
     }
 
     /// `host --runtime-dir <host_dir> <args>`.
-    fn host_cli(&self, args: &[&str]) -> (bool, String, String) {
+    /// `<group> --runtime-dir <host dir> <args>`, e.g. `host status`.
+    fn runtime_cli(&self, group: &str, args: &[&str]) -> (bool, String, String) {
         let dir = self.host_dir().display().to_string();
-        let mut full = vec!["host", "--runtime-dir", dir.as_str()];
+        let mut full = vec![group, "--runtime-dir", dir.as_str()];
         full.extend_from_slice(args);
         self.cli(&full)
     }
@@ -464,7 +479,8 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 
     /// One non-interactive run of the real binary: `(success, stdout, stderr)`.
     fn cli(&self, args: &[&str]) -> (bool, String, String) {
-        let output = self.command(args).output().unwrap();
+        let output =
+            owned_process::run(&mut self.command(args), b"", Duration::from_secs(60)).unwrap();
         (
             output.status.success(),
             String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -570,7 +586,7 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 
     /// The running local host's registered terminals: `(id, agent)`.
     fn host_sessions(&self) -> Vec<(String, String)> {
-        let (ok, stdout, _) = self.host_cli(&["status", "--json"]);
+        let (ok, stdout, _) = self.runtime_cli("host", &["status", "--json"]);
         if !ok {
             return Vec::new();
         }
@@ -591,7 +607,7 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 
     /// The local history of `session` as text.
     fn history(&self, session: &str) -> String {
-        let (_, stdout, _) = self.host_cli(&["history", "get", session, "--json"]);
+        let (_, stdout, _) = self.runtime_cli("history", &["get", session, "--json"]);
         stdout
     }
 
@@ -612,6 +628,21 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
             .unwrap()
             .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
             .unwrap()
+    }
+
+    /// Start the user's local host in `host_dir` with the normal backend and
+    /// wait until it answers.
+    fn start_host(&mut self) {
+        let log = std::fs::File::create(self.root().join("host.log")).unwrap();
+        let mut command = self.command(&["host", "--runtime-dir"]);
+        command
+            .arg(self.host_dir())
+            .args(["--backend", "normal"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(log);
+        self.host = Some(owned_process::Owned::spawn(&mut command));
+        wait("the user's host", self, || self.host_reachable());
     }
 
     fn host_reachable(&self) -> bool {
@@ -699,14 +730,16 @@ impl Env {
 
 impl Drop for Env {
     /// Stops what this test started without signalling any pid read from a
-    /// file: the binary is its own child, and the agent stubs stop themselves
-    /// on `stop` (bounded wait for each recorder's `done.<pid>`).
+    /// file: the binary is its own child, the host's whole process group goes
+    /// with it, and the agent stubs stop themselves on `stop` (bounded wait
+    /// for each recorder's `done.<pid>`).
     fn drop(&mut self) {
         let _ = std::fs::write(self.stubs.join("stop"), b"stop");
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+        self.host = None;
         let deadline = Instant::now() + Duration::from_secs(5);
         while self
             .runs()
@@ -734,7 +767,7 @@ fn wait(what: &str, env: &Env, mut ready: impl FnMut() -> bool) {
             env.runs(),
             env.central.recorded.lines(),
             env.cli(&["host", "status", "--json"]),
-            std::fs::read_to_string(env.host_dir().join("live-host.log")).unwrap_or_default()
+            std::fs::read_to_string(env.root().join("host.log")).unwrap_or_default()
         );
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -757,25 +790,15 @@ impl Drop for Owned {
 }
 
 #[test]
-fn live_registers_with_the_host_already_running_and_leaves_it_running() {
+fn start_agent_registers_with_the_running_host_and_leaves_it_running() {
     let mut env = Env::new();
-    // Not the default runtime directory: `live` has to find this host.
-    let runtime = env.root().join("user-host");
-    env.runtime = Some(runtime.clone());
-    let mut host = Owned(
-        env.command(&["host", "--runtime-dir"])
-            .arg(&runtime)
-            .args(["run", "--backend", "normal"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
-    wait("the user's host", &env, || env.host_reachable());
-    env.run(&["live"]);
-    wait("the seeded agent", &env, || !env.runs().is_empty());
+    // Not the default runtime directory: `start-agent` has to find this host.
+    env.runtime = Some(env.root().join("user-host"));
+    env.start_host();
+    env.run(&["start-agent", "claude"]);
+    wait("the agent", &env, || !env.runs().is_empty());
     let (_, wrapped, argv) = env.runs()[0].clone();
+    assert!(argv.starts_with("claude --session-id "), "{argv}");
     let session = argv.split_whitespace().nth(2).unwrap().to_owned();
     assert_eq!(wrapped, session, "{argv}");
     wait("the registration with the running host", &env, || {
@@ -786,16 +809,16 @@ fn live_registers_with_the_host_already_running_and_leaves_it_running() {
     });
     assert!(
         !env.root().join(".conversations-host-local").exists(),
-        "live started a host of its own"
+        "start-agent used a runtime of its own"
     );
 
-    let mut live = env.child.take().unwrap();
-    let _ = live.kill();
-    let _ = live.wait();
+    let mut started = env.child.take().unwrap();
+    let _ = started.kill();
+    let _ = started.wait();
     std::thread::sleep(Duration::from_secs(2));
     assert!(
-        host.0.try_wait().unwrap().is_none(),
-        "live stopped the user's host"
+        !env.host.as_ref().unwrap().exited(),
+        "start-agent stopped the user's host"
     );
     assert!(env.host_reachable());
     assert_eq!(env.central.legacy_channels(), Vec::<String>::new());
@@ -803,18 +826,16 @@ fn live_registers_with_the_host_already_running_and_leaves_it_running() {
 }
 
 #[test]
-fn live_mux_sessions_are_local_host_registrations_with_local_history_and_handoff() {
+fn started_agents_are_local_host_registrations_with_local_history_and_handoff() {
     let mut env = Env::new();
-    env.run(&["live"]);
-    wait("the seeded agent", &env, || !env.runs().is_empty());
+    env.start_host();
+    env.run(&["start-agent", "claude"]);
+    wait("the agent", &env, || !env.runs().is_empty());
     let (pid, wrapped, argv) = env.runs()[0].clone();
     assert!(argv.starts_with("claude --session-id "), "{argv}");
     let session = argv.split_whitespace().nth(2).unwrap().to_owned();
     // The agent runs in a real host wrapper under its own session id …
-    assert_eq!(
-        wrapped, session,
-        "the mux agent is not host-wrapped: {argv}"
-    );
+    assert_eq!(wrapped, session, "the agent is not host-wrapped: {argv}");
     // … registered with this machine's host, with its history kept locally.
     wait("the local host registration", &env, || {
         env.host_sessions()
@@ -853,60 +874,37 @@ fn live_mux_sessions_are_local_host_registrations_with_local_history_and_handoff
         .find(|(_, wrapped, _)| wrapped == &child)
         .unwrap();
     assert!(handed.2.contains(BRIEF_MARK), "{handed:?}");
-
-    // `Ctrl-a c` still starts exactly one more local session, also registered.
-    let before = env.runs().len();
-    env.type_locally("\x01c");
-    wait("the Ctrl-a c agent", &env, || env.runs().len() > before);
-    let (_, third, third_argv) = env.runs()[before].clone();
-    assert!(
-        third_argv.starts_with("claude --session-id "),
-        "{third_argv}"
-    );
-    wait("the Ctrl-a c registration", &env, || {
-        env.host_sessions().iter().any(|(id, _)| id == &third)
-    });
     assert!(alive(pid));
 
     assert_eq!(env.central.legacy_channels(), Vec::<String>::new());
     assert_eq!(env.central.private_exposure(), json!({}));
 
-    // Leaving the mux stops the host it started for itself.
-    let mut live = env.child.take().unwrap();
-    let _ = live.kill();
-    let _ = live.wait();
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while env.host_reachable() {
-        assert!(Instant::now() < deadline, "the mux left its host running");
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // Leaving the agent's terminal leaves the user's host running.
+    let mut started = env.child.take().unwrap();
+    let _ = started.kill();
+    let _ = started.wait();
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(env.host_reachable(), "start-agent stopped the user's host");
 }
 
 #[test]
-fn live_host_mode_resumes_from_the_local_record_and_registers_locally() {
+fn start_agent_resume_reuses_the_native_session_record_and_registers_locally() {
     let mut env = Env::new();
     let session = "6c0f3f9e-3d0b-4a57-9f41-2d6c3a0e5b21";
-    env.write_config(
-        "open-sessions.json",
-        json!({"servers": {env.central.url.clone(): [{
-            "session_id": session,
-            "agent": "claude",
-            "cwd": env.work,
-        }]}}),
-    );
-    env.run(&["live", "--host"]);
-    wait("the resume prompt", &env, || env.screen().contains("[Y/n]"));
-    env.type_locally("y\r");
+    env.transcript(session, &["neutral opener", TRANSCRIPT_MARK]);
+    env.start_host();
+    env.run(&["start-agent", "claude", "--resume", session]);
     wait("the resumed agent", &env, || !env.runs().is_empty());
     let (_, wrapped, argv) = env.runs()[0].clone();
     let args: Vec<_> = argv.split_whitespace().collect();
-    assert_eq!(args.len(), 5);
+    assert_eq!(args.len(), 5, "{argv}");
     assert_eq!(&args[..4], &["claude", "--resume", session, "--settings"]);
     let settings: Value = serde_json::from_slice(&std::fs::read(args[4]).unwrap()).unwrap();
     assert!(
         settings["hooks"]["UserPromptSubmit"].is_array(),
         "{settings}"
     );
+    // A Claude session id is its own canonical id.
     assert_eq!(wrapped, session);
     wait("the local host registration", &env, || {
         env.host_sessions().iter().any(|(id, _)| id == session)
@@ -914,6 +912,16 @@ fn live_host_mode_resumes_from_the_local_record_and_registers_locally() {
     wait("the resumed transcript in local history", &env, || {
         env.history(session).contains(TRANSCRIPT_MARK)
     });
+    let record = env.local_record(session).unwrap();
+    assert_eq!(
+        (&record.0, &record.1, &record.2),
+        (
+            &"claude".to_owned(),
+            &env.work.display().to_string(),
+            &Some(session.to_owned())
+        )
+    );
+    assert_eq!(env.local_record_count(), 1);
     std::thread::sleep(Duration::from_millis(500));
     env.type_locally(&format!("{TYPED_MARK}\r"));
     wait("local keys to reach the resumed agent", &env, || {
@@ -921,6 +929,85 @@ fn live_host_mode_resumes_from_the_local_record_and_registers_locally() {
     });
     assert_eq!(env.central.legacy_channels(), Vec::<String>::new());
     assert_eq!(env.central.private_exposure(), json!({}));
+}
+
+/// An OpenCode `ses_…` id is resumed under the canonical record `upload`
+/// already made for it, with its local history; one bound to another native
+/// session is refused before anything starts.
+#[test]
+fn start_agent_resumes_opencode_under_its_canonical_record_and_refuses_a_conflict() {
+    let mut env = Env::new();
+    env.write_config(
+        "local-host.json",
+        json!({"publication": {"account": ALICE}}),
+    );
+    let (native, conflict) = ("ses_4b8e1d7aResumeMe", "ses_9c2f5a3bConflicting");
+    let db = env.opencode_db(native, &["neutral opener", TRANSCRIPT_MARK]);
+    {
+        let opencode = rusqlite::Connection::open(&db).unwrap();
+        opencode
+            .execute(
+                "INSERT INTO session_v2 VALUES (?1, ?2, 'neutral title', '2.0', 1762077600000, 1762077600000)",
+                rusqlite::params![conflict, env.work.display().to_string()],
+            )
+            .unwrap();
+    }
+    Env::opencode_turn(&db, conflict, "conflict turn");
+    let db_arg = db.display().to_string();
+    let adopt = |env: &Env, native: &str| {
+        let (ok, stdout, stderr) = env.cli(&[
+            "--opencode-db",
+            &db_arg,
+            "upload",
+            "--agent",
+            "opencode",
+            native,
+        ]);
+        assert!(ok, "{stdout}\n{stderr}");
+        canonical_upload_id(&stdout, native)
+    };
+    let canonical = adopt(&env, native);
+    let conflict_id = adopt(&env, conflict);
+    rusqlite::Connection::open(env.host_dir().join("authz.db"))
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET resume_id = 'ses_someoneElse' WHERE session_id = ?1",
+            [&conflict_id],
+        )
+        .unwrap();
+    env.start_host();
+
+    // The conflicting binding is refused before anything starts.
+    let (ok, stdout, stderr) = env.cli(&["start-agent", "opencode", "--resume", conflict]);
+    assert!(!ok, "a conflicting record was retargeted: {stdout}");
+    assert!(
+        stderr.contains("already bound to another native session"),
+        "{stdout}\n{stderr}"
+    );
+    assert_eq!(
+        env.local_record(&conflict_id).map(|r| r.2),
+        Some(Some("ses_someoneElse".to_owned()))
+    );
+
+    env.run(&["start-agent", "opencode", "--resume", native]);
+    wait("the resumed agent", &env, || !env.runs().is_empty());
+    let (_, wrapped, argv) = env.runs()[0].clone();
+    assert_eq!(wrapped, canonical, "{argv}");
+    assert!(argv.starts_with("opencode "), "{argv}");
+    assert!(argv.contains(&format!("--session {native}")), "{argv}");
+    wait("the local host registration", &env, || {
+        env.host_sessions()
+            .iter()
+            .any(|(id, agent)| id == &canonical && agent == "opencode")
+    });
+    assert!(env.history(&canonical).contains(TRANSCRIPT_MARK));
+    assert_eq!(
+        env.local_record(&canonical).map(|r| r.2),
+        Some(Some(native.to_owned()))
+    );
+    assert_eq!(env.local_record_count(), 2);
+    assert_eq!(env.runs().len(), 1, "{:?}", env.runs());
+    assert_eq!(env.central.legacy_channels(), Vec::<String>::new());
 }
 
 #[test]
@@ -1138,7 +1225,7 @@ fn upload_resends_the_identical_request_after_a_lost_acknowledgement() {
     let ids = published_ids(&env, session);
     let expected: Vec<String> = (0..1200).map(|n| format!("{session}-m{n}")).collect();
     assert_eq!(ids, expected);
-    let (_, status, _) = env.host_cli(&["history", "status", session]);
+    let (_, status, _) = env.runtime_cli("history", &["status", session]);
     assert!(status.contains("shared"), "{status}");
 }
 
@@ -1158,7 +1245,7 @@ fn upload_and_the_running_host_publish_one_request_at_a_time() {
     let _host = Owned(
         env.command(&["host", "--runtime-dir"])
             .arg(&runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1176,7 +1263,7 @@ fn upload_and_the_running_host_publish_one_request_at_a_time() {
     assert_eq!(published_ids(&env, session), expected);
     // Let the host's loop run over the finished publication too.
     std::thread::sleep(Duration::from_secs(3));
-    let (_, status, _) = env.host_cli(&["history", "status", session]);
+    let (_, status, _) = env.runtime_cli("history", &["status", session]);
     assert!(
         status.contains("shared") && !status.contains("error"),
         "{status}"

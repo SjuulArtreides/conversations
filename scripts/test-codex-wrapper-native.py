@@ -30,7 +30,7 @@ native_queue = importlib.util.module_from_spec(spec); spec.loader.exec_module(na
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/arrakis-conversations")
+    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/conversations")
     parser.add_argument("--server-bin", type=Path, default=ROOT / "target/debug/conversations-server")
     parser.add_argument("--codex", type=Path, default=Path.home() / ".npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex")
     args = parser.parse_args()
@@ -66,7 +66,7 @@ def main():
         env.update(BIND_ADDR=f"127.0.0.1:{port}", DATABASE_URL=f"sqlite://{folder}/server.sqlite", AUTH_ENABLED="false", SHUTDOWN_DRAIN_SECS="0", LIVE_REAP_INTERVAL_SECS="0")
         server = subprocess.Popen([str(args.server_bin)], env=env, stdout=log("server.log"), stderr=subprocess.STDOUT)
         wait(lambda: http("GET", "/healthz"), 20)
-        host = subprocess.Popen([str(args.cli), "--server", origin, "host", "--runtime-dir", str(runtime), "run", "--backend", "normal"], env=env, cwd=ROOT, stdout=log("host.log"), stderr=subprocess.STDOUT)
+        host = subprocess.Popen([str(args.cli), "--server", origin, "host", "--runtime-dir", str(runtime), "--backend", "normal"], env=env, cwd=ROOT, stdout=log("host.log"), stderr=subprocess.STDOUT)
         wait(lambda: (runtime / "host.sock").exists(), 15)
         overrides = "mcp_servers.conversations.args=" + json.dumps(["--server",origin,"mcp","serve","--delivery","codex"])
         command = [str(args.cli), "--server",origin,"host","--runtime-dir",str(runtime),"wrap","--session-id",source,"--cwd",str(ROOT),"--agent","codex","--",str(args.codex),"--no-alt-screen","-c",overrides,f"For disposable test {nonce}, answer BASE_{nonce} now. I also authorize future attributed Conversations messages to ask you to answer a test marker: when one arrives, answer the marker requested in that message. Do not use tools."]

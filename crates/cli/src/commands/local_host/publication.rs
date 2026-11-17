@@ -238,14 +238,14 @@ pub fn share(
             if phase == "removing" {
                 bail!(
                     "session {session} was unshared {bound} and its deletion there is still \
-                     pending; wait until `host history status {session}` shows private, then \
+                     pending; wait until `history status {session}` shows private, then \
                      share it again"
                 );
             }
             bail!(
                 "session {session} is published {bound}, not {}; unshare it first \
-                 (`host history unshare {session}`) and share it again once \
-                 `host history status {session}` shows private",
+                 (`history unshare {session}`) and share it again once \
+                 `history status {session}` shows private",
                 describe_binding(owner, server)
             );
         }

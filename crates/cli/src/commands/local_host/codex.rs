@@ -340,9 +340,11 @@ fn is_registration(config: &Value) -> bool {
         && config["transport"]["command"]
             .as_str()
             .is_some_and(|command| {
+                // Registrations made before the executable was renamed still
+                // name a working `arrakis-conversations` install.
                 Path::new(command)
                     .file_name()
-                    .is_some_and(|name| name == "arrakis-conversations")
+                    .is_some_and(|name| name == "conversations" || name == "arrakis-conversations")
             })
         && config["transport"]["args"].as_array().is_some_and(|args| {
             args.windows(2)

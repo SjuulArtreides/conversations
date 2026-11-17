@@ -330,7 +330,7 @@ export interface LiveSession {
    */
   viewer_can_write: boolean;
   /**
-   * True when a live `conversations live` CLI is currently attached to the
+   * True when the session's local host is currently attached to the
    * session's interactive streams. For interactive sessions this means raw
    * keyboard input is deliverable, not merely that the reply stream exists.
    * May be absent on older server responses; treat `undefined` as attached.
@@ -592,7 +592,7 @@ export interface PrReplyResult {
 
 /**
  * Result of relaying a PR sync (`POST /api/sessions/{id}/prs/sync`).
- * `delivered:false` means no CLI agent (`host run` / `live --host`) is attached
+ * `delivered:false` means no CLI agent (`host`) is attached
  * to run `gh` and push the refreshed status + comments.
  */
 export interface PrSyncResult {

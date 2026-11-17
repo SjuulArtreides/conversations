@@ -172,7 +172,7 @@ impl Cmux {
 
     pub async fn connect(binary: Option<&Path>) -> Result<Self> {
         let host_workspace = std::env::var("CMUX_WORKSPACE_ID").context(
-            "cmux backend must run inside a cmux terminal; launch `host run` in a dedicated pane",
+            "cmux backend must run inside a cmux terminal; launch `host` in a dedicated pane",
         )?;
         Self::connect_to(binary, host_workspace).await
     }
@@ -584,9 +584,8 @@ impl Cmux {
         }
         let executable = std::env::current_exe()?;
         // No `--backend cmux`: the new workspace inherits a live CMUX_WORKSPACE_ID
-        // and `host run`'s auto-detection resolves it to cmux. Compatibility is
-        // preserved via explicit `--backend cmux` on the Run subcommand for any
-        // operator (or test) that still wants to force the choice.
+        // and bare `host`'s auto-detection resolves it to cmux. An operator (or
+        // test) can still force the choice with an explicit `--backend cmux`.
         let argv = [
             "env".to_owned(),
             "-u".to_owned(),
@@ -597,7 +596,6 @@ impl Cmux {
             "host".to_owned(),
             "--runtime-dir".to_owned(),
             runtime_dir.to_string_lossy().into_owned(),
-            "run".to_owned(),
         ];
         let command = login_command(&argv)
             .iter()

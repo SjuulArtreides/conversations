@@ -1,4 +1,4 @@
-//! `arrakis-conversations login` / `logout` — authenticate against a server
+//! `conversations login` / `logout` — authenticate against a server
 //! with email + password and persist the session cookie so `upload`/`ping`
 //! work when the server has auth enabled.
 

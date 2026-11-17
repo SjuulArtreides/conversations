@@ -139,7 +139,7 @@ def main():
             return json.load(response)
 
     def status():
-        result = subprocess.run([str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime),
+        result = subprocess.run([str(target / "conversations"), "host", "--runtime-dir", str(runtime),
             "status", "--json"], capture_output=True, text=True, timeout=8, check=True)
         return json.loads(result.stdout)["sessions"]
 
@@ -157,25 +157,25 @@ def main():
             "initial_command":"/bin/sleep 240", "workspace_env":{"CONVERSATIONS_CAPTURE":"0"}, "focus":False}), "isolated cmux window readiness")
         workspaces.append(context["workspace_id"])
         environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"], CMUX_WINDOW_ID=args.cmux_window)
-        host = spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
-            "run", "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
+        host = spawn([str(target / "conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
+            "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "host socket")
         host_id = subprocess.check_output(
-            [str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime),
-             "credential", "identity"],
+            [str(target / "conversations"), "credential", "--runtime-dir", str(runtime),
+             "identity"],
             cwd=ROOT, env=environment, timeout=3, text=True,
         ).strip()
         wait(lambda: http(f"/api/host-relay/{host_id}/status")["online"], "host relay connection")
         project = http("/api/projects", {"name":"cmux collaboration"})["id"]
         source, peer = str(uuid.uuid4()), str(uuid.uuid4())
-        config = {"cli":str(target / "arrakis-conversations"), "origin":origin, "cookie_file":str(cookie_file), "source":source, "peer":peer}
+        config = {"cli":str(target / "conversations"), "origin":origin, "cookie_file":str(cookie_file), "source":source, "peer":peer}
         config_file = scratch / "config.json"
         config_file.write_text(json.dumps(config))
         for identity in [source, peer]:
             http("/api/live", {"session_id":identity, "agent":"zsh", "title":"MCP cmux test"})
             http(f"/api/sessions/{identity}/project", {"project_id":project}, "PUT")
         for role, identity in [("peer",peer),("source",source)]:
-            argv = [str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime), "wrap",
+            argv = [str(target / "conversations"), "host", "--runtime-dir", str(runtime), "wrap",
                 "--session-id",identity,"--cwd",str(scratch),"--agent","zsh","--",sys.executable,str(Path(__file__).resolve()),
                 "--fixture",role,"--config",str(config_file)]
             created = rpc("workspace.create", {"window_id":args.cmux_window,"title":f"Messaging {role}",
@@ -201,7 +201,7 @@ def main():
         rpc("workspace.close", {"workspace_id":running["workspace"], "force":True})
         host_cwd.rename(scratch / "retired-working-directory")
         with (scratch / "failure-mcp.log").open("w") as log:
-            mcp = load_mcp()(target / "arrakis-conversations", origin, source, log, cookie_file)
+            mcp = load_mcp()(target / "conversations", origin, source, log, cookie_file)
             try:
                 failing = {"brief":"This startup must fail because its directory is absent", "idempotency_key":"expected-startup-failure", "agent":"codex"}
                 def failed():

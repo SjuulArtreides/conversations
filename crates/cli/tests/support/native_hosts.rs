@@ -1,6 +1,6 @@
 //! Real-binary fixture for agent-to-agent messaging between two hosts: a REAL
 //! central server in process (with a request/response recorder and optional
-//! hostile rewrites of relay traffic), REAL `arrakis-conversations host run`
+//! hostile rewrites of relay traffic), REAL `conversations host`
 //! processes with isolated HOME/XDG/runtime directories, REAL `mcp serve`
 //! processes speaking JSON-RPC on stdio, and a recording stub `claude`.
 //!
@@ -19,7 +19,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::rtc;
 
-pub const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+pub const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 
 // ---------------------------------------------------------------- central --
 
@@ -349,7 +349,7 @@ impl NativeHost {
             .command()
             .args(["--server", &self.central, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdout(log.try_clone().unwrap())
             .stderr(log)
             .spawn()
@@ -392,12 +392,14 @@ impl NativeHost {
         std::fs::read_to_string(self.root.join("host.log")).unwrap_or_default()
     }
 
+    /// `<group> --runtime-dir <runtime> <rest>` for `args = [group, rest..]`.
     fn cli(&self, args: &[&str]) -> String {
         let output = self
             .command()
-            .args(["host", "--runtime-dir"])
+            .args(&args[..1])
+            .arg("--runtime-dir")
             .arg(&self.runtime)
-            .args(args)
+            .args(&args[1..])
             .output()
             .unwrap();
         assert!(

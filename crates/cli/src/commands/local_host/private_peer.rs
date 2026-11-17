@@ -5,7 +5,7 @@
 //!
 //! 1. `peer_challenge`: a fresh nonce, answered with a challenge signed by the
 //!    recipient host. Checked against the host key PINNED locally by
-//!    `host credential pair-peer`, never a key central supplies.
+//!    `credential pair-peer`, never a key central supplies.
 //! 2. `peer_offer`: a signed `peer.offer` binding that challenge, the SHA-256 of
 //!    our SDP and our DTLS fingerprint. The signed `peer_answer` must bind our
 //!    exact offer bytes, its own SDP and its DTLS fingerprint; that fingerprint

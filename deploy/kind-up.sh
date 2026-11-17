@@ -33,5 +33,5 @@ kubectl -n arrakis-conversations rollout status deploy/conversations --timeout=1
 echo
 echo "App should be reachable at http://localhost:8080"
 echo "  health:  curl http://localhost:8080/healthz"
-echo "  upload:  arrakis-conversations --server http://localhost:8080 upload --all"
+echo "  upload:  conversations --server http://localhost:8080 upload --all"
 echo "Tear down with: kind delete cluster --name $CLUSTER"

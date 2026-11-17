@@ -106,7 +106,7 @@ function HostRow({
         >
           This host was paired before its identity key was pinned, so nothing it
           says can be verified. Forget it and pair again with the descriptor
-          from <code>host credential descriptor</code>.
+          from <code>credential descriptor</code>.
         </p>
       )}
       <label className="mt-2 block text-sm">
@@ -224,7 +224,7 @@ export function HostPairing() {
           <Input
             value={hostId}
             onChange={(e) => setHostId(e.target.value)}
-            placeholder="chd1.… from `host credential descriptor`"
+            placeholder="chd1.… from `credential descriptor`"
             className="font-mono text-xs"
           />
         </label>
@@ -259,15 +259,15 @@ export function HostPairing() {
         </summary>
         <ol className="mt-2 list-decimal space-y-1 pl-5">
           <li>
-            Run <code>arrakis-conversations host credential descriptor</code> to
+            Run <code>conversations credential descriptor</code> to
             print the host descriptor, and set <code>webauthn.rp_id</code> and{" "}
             <code>webauthn.origins</code> in the host settings to include this
             page ({window.location.origin}).
           </li>
           <li>
-            Run <code>arrakis-conversations host run</code>, then{" "}
+            Run <code>conversations host</code>, then{" "}
             <code>
-              arrakis-conversations host passkey enroll-start --label laptop
+              conversations passkey enroll-start --label laptop
               --grant session.start --grant session.reopen --grant history.read
               --grant session.write --grant session.pr_comment --grant
               session.manage_sharing --grant host.settings_read --grant
@@ -284,8 +284,8 @@ export function HostPairing() {
           </li>
           <li>
             Approve the registration on the host:{" "}
-            <code>host passkey pending</code>, then{" "}
-            <code>host passkey approve &lt;id&gt;</code>. This page cannot
+            <code>passkey pending</code>, then{" "}
+            <code>passkey approve &lt;id&gt;</code>. This page cannot
             approve a passkey.
           </li>
         </ol>

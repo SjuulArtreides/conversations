@@ -39,6 +39,7 @@ async fn status_reports_the_hosts_native_identity_for_live_sessions() {
                 file_receiver: false,
                 transfer_gate: false,
                 effect_gate: false,
+                in_place: false,
             },
             resume_published: None,
             opencode_title_published: None,
@@ -349,7 +350,9 @@ fn unsigned_start_and_reopen_frames_launch_nothing() {
         fixture.launch_log()
     );
     assert!(
-        crate::open_sessions::load_for("http://x").is_empty(),
+        crate::open_sessions::try_load_for("http://x")
+            .unwrap()
+            .is_empty(),
         "no launch checkpoint"
     );
 }
@@ -625,6 +628,7 @@ mod signed {
                         file_receiver: false,
                         transfer_gate: false,
                         effect_gate: true,
+                        in_place: false,
                     },
                     resume_published: None,
                     opencode_title_published: None,
@@ -1251,8 +1255,15 @@ mod signed {
             launcher: conversations_core::AgentLauncher::default(),
             adk_statusline: false,
         };
-        crate::open_sessions::update_for(&fixture.server(), |rows| rows.push(saved.clone()))
-            .unwrap();
+        let checkpoints = dirs::config_dir()
+            .unwrap()
+            .join("arrakis-conversations/open-sessions.json");
+        std::fs::create_dir_all(checkpoints.parent().unwrap()).unwrap();
+        std::fs::write(
+            &checkpoints,
+            serde_json::json!({"servers": {fixture.server(): [saved.clone()]}}).to_string(),
+        )
+        .unwrap();
         // Before adoption the host has no record: nothing to reopen.
         runtime()
             .block_on(fixture.run_private(&[reopen_frame(
@@ -1363,7 +1374,7 @@ mod signed {
 mod owner_cookie {
     //! Owner-cookie direct-localhost rename goes through the same effective
     //! title and shared-workspace invariants as the signed hosted path. The
-    //! web process (`host web`) holds no cmux of its own; its rename message
+    //! web server holds no cmux of its own; its rename message
     //! is a typed `OwnerRename` on the daemon's owner-only Unix socket. Both
     //! paths meet at `commit_owner_rename`.
     use super::*;
@@ -1448,6 +1459,7 @@ mod owner_cookie {
                         file_receiver: false,
                         transfer_gate: false,
                         effect_gate: true,
+                        in_place: false,
                     },
                     resume_published: None,
                     opencode_title_published: None,
@@ -1670,7 +1682,7 @@ mod passkey {
     }
 
     /// The real adapter: a request over the host's Unix socket, handled by
-    /// `handle_client` exactly as `host passkey ...` would be.
+    /// `handle_client` exactly as `passkey ...` would be.
     async fn call(fixture: &Fixture, request: PasskeyRequest) -> Result<PasskeyResponse, String> {
         let host = Arc::new(fixture.host(fixture.server()));
         let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
@@ -2763,6 +2775,7 @@ mod passkey {
                     registration: Registration {
                         launch: Launch { id: id.into(), agent: conversations_core::AgentKind::Claude, cwd: "/w".into(), command: vec!["claude".into()] },
                         workspace: None, surface: None, local_terminal: true, reconnecting: false, file_receiver: false, transfer_gate: false, effect_gate: true,
+                        in_place: false,
                     },
                     resume_published: None, opencode_title_published: None, commands, pid: None,
                 });
@@ -2801,6 +2814,7 @@ mod passkey {
                 registration: Registration {
                     launch: Launch { id: A.into(), agent: conversations_core::AgentKind::Claude, cwd: "/w".into(), command: vec!["claude".into()] },
                     workspace: None, surface: None, local_terminal: true, reconnecting: false, file_receiver: false, transfer_gate: false, effect_gate: true,
+                    in_place: false,
                 },
                 resume_published: None, opencode_title_published: None, commands, pid: None,
             });
@@ -4336,6 +4350,7 @@ mod write {
                         file_receiver: true,
                         transfer_gate: true,
                         effect_gate: true,
+                        in_place: false,
                     },
                     resume_published: None,
                     opencode_title_published: None,
@@ -7805,7 +7820,7 @@ mod lifecycle {
         )
     }
 
-    /// An executable standing in for `arrakis-conversations`: it records that it
+    /// An executable standing in for `conversations`: it records that it
     /// was really spawned (pid and argv), and never registers anything.
     fn recording_executable(dir: &Path) -> PathBuf {
         let path = dir.join("recording-wrapper");
@@ -7913,6 +7928,7 @@ mod lifecycle {
                     file_receiver: false,
                     transfer_gate: false,
                     effect_gate: true,
+                    in_place: false,
                 },
             },
         )
@@ -8554,6 +8570,7 @@ mod lifecycle {
                 file_receiver: false,
                 transfer_gate: false,
                 effect_gate: true,
+                in_place: false,
             };
 
             // Codex: nothing is guessed until the private app-server names its root thread.
