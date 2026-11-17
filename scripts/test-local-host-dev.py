@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix="host-dev-recovery-", dir=root / "tmp") 
     command = [sys.executable, str(root / "scripts/local-host-dev.py"), "--backend", "normal",
         "--target-dir", str(args.target_dir.resolve()), "--sandbox-dir", str(sandbox), "--port", str(port)]
     environment = {k: v for k, v in os.environ.items() if not k.startswith(("CONVERSATIONS_", "CMUX_"))}
-    status_command = [str(args.target_dir.resolve() / "debug/arrakis-conversations"),
+    status_command = [str(args.target_dir.resolve() / "debug/conversations"),
         "host", "--runtime-dir", str(sandbox / "host"), "status", "--json"]
     def host_alive():
         return subprocess.run(status_command, capture_output=True, timeout=3).returncode == 0

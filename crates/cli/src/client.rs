@@ -58,7 +58,7 @@ impl ApiClient {
     /// Use the host's selected login, including an explicit --cookie-file.
     pub fn with_cookie(base: &str, cookie: Option<String>) -> Result<Self> {
         let http = Client::builder()
-            .user_agent(concat!("arrakis-conversations/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("conversations/", env!("CARGO_PKG_VERSION")))
             .build()
             .context("failed to build HTTP client")?;
         let base = base.trim_end_matches('/').to_string();
@@ -255,7 +255,7 @@ impl ApiClient {
             if status_code == reqwest::StatusCode::UNAUTHORIZED {
                 anyhow::bail!(
                     "push PR status rejected (401): this server requires authentication — run \
-                     `arrakis-conversations login` first"
+                     `conversations login` first"
                 );
             }
             let text = resp.text().unwrap_or_default();
@@ -296,7 +296,7 @@ impl ApiClient {
             if status_code == reqwest::StatusCode::UNAUTHORIZED {
                 anyhow::bail!(
                     "push PR comments rejected (401): this server requires authentication — run \
-                     `arrakis-conversations login` first"
+                     `conversations login` first"
                 );
             }
             let text = resp.text().unwrap_or_default();

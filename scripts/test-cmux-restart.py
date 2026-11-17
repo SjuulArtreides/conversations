@@ -202,7 +202,7 @@ async def test():
     spec.loader.exec_module(module)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--cli", type=Path, default=ROOT / "target/release/arrakis-conversations"
+        "--cli", type=Path, default=ROOT / "target/release/conversations"
     )
     parser.add_argument(
         "--server", type=Path, default=ROOT / "target/debug/conversations-server"

@@ -1,4 +1,4 @@
-//! `arrakis-conversations` — discover local Claude Code sessions and upload them
+//! `conversations` — discover local Claude Code sessions and upload them
 //! to a conversations server.
 //!
 //! Subcommands include `list`, `upload`, `start-agent`, `host` and `ping`. See

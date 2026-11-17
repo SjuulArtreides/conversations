@@ -18,7 +18,7 @@ import uuid
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
-    "--cli", type=Path, default=root / "target/release/arrakis-conversations"
+    "--cli", type=Path, default=root / "target/release/conversations"
 )
 a = parser.parse_args()
 (root / "tmp").mkdir(exist_ok=True)

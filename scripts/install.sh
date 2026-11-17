@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Install the CLI AFTER binary releases have been published in this repository.
 # The initial source snapshot has no binary releases; build from source instead
-# (see README.md). This script is retained for future compatible release assets.
+# (see README.md). This script is retained for future compatible release assets,
+# which must be named `conversations-<version>-<target>.tar.gz` and contain a
+# `conversations` executable.
 #
 # The macOS binaries aren't notarized (no Apple Developer ID), so a raw download
 # trips Gatekeeper ("Apple could not verify ... is free of malware"). This
@@ -19,7 +21,7 @@
 set -euo pipefail
 
 REPO="SjuulArtreides/conversations"
-BIN="arrakis-conversations"
+BIN="conversations"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 TAG="${1:-}"
 

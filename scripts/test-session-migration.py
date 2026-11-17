@@ -177,7 +177,7 @@ def codex_resume(binary, destination, native, cwd, expected_cwd):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/arrakis-conversations")
+    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/conversations")
     parser.add_argument("--codex", default=shutil.which("codex"))
     parser.add_argument("--opencode", type=Path)
     args = parser.parse_args()

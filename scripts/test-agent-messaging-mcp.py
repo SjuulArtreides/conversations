@@ -177,7 +177,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-dir", type=Path, default=ROOT / "target")
     args = parser.parse_args()
-    cli = args.target_dir.resolve() / "debug/arrakis-conversations"
+    cli = args.target_dir.resolve() / "debug/conversations"
     server = args.target_dir.resolve() / "debug/conversations-server"
     (ROOT / "tmp").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="messaging-mcp-", dir=ROOT / "tmp") as folder:

@@ -30,7 +30,7 @@ native_queue = importlib.util.module_from_spec(spec); spec.loader.exec_module(na
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/arrakis-conversations")
+    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/conversations")
     parser.add_argument("--server-bin", type=Path, default=ROOT / "target/debug/conversations-server")
     parser.add_argument("--codex", type=Path, default=Path.home() / ".npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex")
     args = parser.parse_args()

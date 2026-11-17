@@ -4198,7 +4198,7 @@ fn launch_from_control_with_id(
             Path::new(&invocation.program),
             &env.resolve_environment(),
         )
-        .context("adk is not executable on the host PATH; restart the Conversations host from the Arrakis DevKit dev shell, or run `arrakis-conversations host configure --arrakis-home <checkout> --launcher-path <dir-with-adk>`")?;
+        .context("adk is not executable on the host PATH; restart the Conversations host from the Arrakis DevKit dev shell, or run `conversations host configure --arrakis-home <checkout> --launcher-path <dir-with-adk>`")?;
         invocation.program = program.to_string_lossy().into_owned();
     }
     let mut command = if invocation.env.is_empty() {
@@ -4365,7 +4365,7 @@ mod tests {
                 let home = PathBuf::from(std::env::var_os("HOME").unwrap());
                 let captured = std::fs::read_to_string(home.join("wrapper-args")).unwrap();
                 let mut args = crate::cli::Cli::parse_from(
-                    std::iter::once("arrakis-conversations").chain(captured.lines()),
+                    std::iter::once("conversations").chain(captured.lines()),
                 );
                 args.global.server = args
                     .global

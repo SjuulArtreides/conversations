@@ -1,4 +1,4 @@
-//! `arrakis-conversations list` — show discovered local sessions in a table.
+//! `conversations list` — show discovered local sessions in a table.
 
 use anyhow::Result;
 use conversations_core::SessionFileRef;

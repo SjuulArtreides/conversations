@@ -34,7 +34,7 @@ import type { LaunchTarget, LiveSession, UserSettings } from "@/lib/types";
 
 /** Tooltip shown when no CLI host is attached (buttons disabled). */
 export const NO_HOST_TOOLTIP =
-  "Your paired host is offline — run `arrakis-conversations host` on it";
+  "Your paired host is offline — run `conversations host` on it";
 
 /** Toast shown when the host executed the signed command. */
 const DELIVERED_OK =

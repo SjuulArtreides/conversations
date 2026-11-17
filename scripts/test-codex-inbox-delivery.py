@@ -104,7 +104,7 @@ def main():
         with unix_serve(queue, socket) as server, open(Path(scratch) / "mcp.log", "w+") as log:
             threading.Thread(target=server.serve_forever, daemon=True).start()
             env = dict(os.environ, CONVERSATIONS_CODEX_SOCKET=socket)
-            child = subprocess.Popen([str(ROOT / "target/debug/arrakis-conversations"), "--server",
+            child = subprocess.Popen([str(ROOT / "target/debug/conversations"), "--server",
                 f"http://127.0.0.1:{api.server_port}", "mcp", "serve", "--session", SOURCE, "--delivery", "codex"],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=env)
             try:
@@ -127,7 +127,7 @@ def main():
                     bridge_env = dict(os.environ)
                     bridge_env.pop("CONVERSATIONS_WRAPPED", None)
                     if wrapped is not None: bridge_env["CONVERSATIONS_WRAPPED"] = wrapped
-                    return subprocess.Popen([str(ROOT / "target/debug/arrakis-conversations"), "--server",
+                    return subprocess.Popen([str(ROOT / "target/debug/conversations"), "--server",
                         f"http://127.0.0.1:{api.server_port}", "mcp", "bridge", "--session", SOURCE, "--native-session", native],
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=bridge_env)
                 first = bridge(NATIVE)
@@ -182,7 +182,7 @@ def main():
                 assert not private_socket.exists()
                 def native_pump():
                     native_env = dict(os.environ, CONVERSATIONS_CODEX_SOCKET=str(private_socket))
-                    proc = subprocess.Popen([str(ROOT / "target/debug/arrakis-conversations"), "--server",
+                    proc = subprocess.Popen([str(ROOT / "target/debug/conversations"), "--server",
                         f"http://127.0.0.1:{api.server_port}", "mcp", "serve", "--session", SOURCE, "--delivery", "codex"],
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=native_env)
                     proc.stdin.write(json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{

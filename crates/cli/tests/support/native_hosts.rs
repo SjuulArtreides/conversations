@@ -1,6 +1,6 @@
 //! Real-binary fixture for agent-to-agent messaging between two hosts: a REAL
 //! central server in process (with a request/response recorder and optional
-//! hostile rewrites of relay traffic), REAL `arrakis-conversations host`
+//! hostile rewrites of relay traffic), REAL `conversations host`
 //! processes with isolated HOME/XDG/runtime directories, REAL `mcp serve`
 //! processes speaking JSON-RPC on stdio, and a recording stub `claude`.
 //!
@@ -19,7 +19,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::rtc;
 
-pub const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+pub const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 
 // ---------------------------------------------------------------- central --
 

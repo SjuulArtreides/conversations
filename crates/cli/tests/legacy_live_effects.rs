@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The real `arrakis-conversations start-agent` under a real terminal, with a
+//! The real `conversations start-agent` under a real terminal, with a
 //! real local host, against the REAL central server router. A logged-in web
 //! viewer drives every old unsigned channel the server still exposes — reply
 //! text, raw web keystrokes, resize, repaint, end, start-new, re-open, handoff
@@ -24,7 +24,7 @@ use futures::SinkExt;
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::{json, Value};
 
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 const ALICE: &str = "alice@example.com";
 
 /// The real server router on loopback, with auth on so the per-user control

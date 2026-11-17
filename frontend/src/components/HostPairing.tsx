@@ -259,15 +259,15 @@ export function HostPairing() {
         </summary>
         <ol className="mt-2 list-decimal space-y-1 pl-5">
           <li>
-            Run <code>arrakis-conversations credential descriptor</code> to
+            Run <code>conversations credential descriptor</code> to
             print the host descriptor, and set <code>webauthn.rp_id</code> and{" "}
             <code>webauthn.origins</code> in the host settings to include this
             page ({window.location.origin}).
           </li>
           <li>
-            Run <code>arrakis-conversations host</code>, then{" "}
+            Run <code>conversations host</code>, then{" "}
             <code>
-              arrakis-conversations passkey enroll-start --label laptop
+              conversations passkey enroll-start --label laptop
               --grant session.start --grant session.reopen --grant history.read
               --grant session.write --grant session.pr_comment --grant
               session.manage_sharing --grant host.settings_read --grant

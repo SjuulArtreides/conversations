@@ -1,5 +1,5 @@
 //! Embed the short git SHA (and a `-dirty` marker) into the binary so
-//! `arrakis-conversations --version` is self-identifying — you can tell at a
+//! `conversations --version` is self-identifying — you can tell at a
 //! glance whether a reinstall actually picked up new code. Falls back to
 //! `unknown` when git isn't available (e.g. a source tarball build).
 

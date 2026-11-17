@@ -81,7 +81,7 @@ def main():
             return json.load(response)
 
     def status():
-        result = subprocess.run([str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime),
+        result = subprocess.run([str(target / "conversations"), "host", "--runtime-dir", str(runtime),
             "status", "--json"], capture_output=True, text=True, timeout=8, check=True)
         return json.loads(result.stdout)["sessions"]
 
@@ -106,7 +106,7 @@ def main():
             "isolated cmux window readiness")
         workspaces.append(context["workspace_id"])
         environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"], CMUX_WINDOW_ID=args.cmux_window)
-        spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
+        spawn([str(target / "conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
             "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "host socket")
         source, context_session = str(uuid.uuid4()), str(uuid.uuid4())
@@ -115,7 +115,7 @@ def main():
             wait(lambda: any(s["launch"]["id"] == identity for s in status()), "local source registration")
         log = open(scratch / "source-mcp.log", "w")
         logs.append(log)
-        mcp = Mcp(target / "arrakis-conversations", origin, source, log, cookie_file, env=environment)
+        mcp = Mcp(target / "conversations", origin, source, log, cookie_file, env=environment)
         clients.append(mcp)
 
         refused = mcp.tool("sessions_end", {"session_id": context_session}, error=True)

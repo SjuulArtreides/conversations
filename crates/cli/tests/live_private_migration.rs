@@ -30,7 +30,7 @@ use conversations_server::{build_router_with_auth, AppState, Config, SqliteRepo}
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::{json, Value};
 
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 const ALICE: &str = "alice@example.com";
 /// Written by the agent into its transcript only.
 const TRANSCRIPT_MARK: &str = "transcriptmarkwolfsbane";

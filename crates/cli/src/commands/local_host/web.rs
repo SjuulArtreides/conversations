@@ -232,7 +232,7 @@ pub(super) fn open_local_management(bootstrap_url: &str) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .context("opening local management; set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `arrakis-conversations open`")?;
+        .context("opening local management; set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `conversations open`")?;
     Ok(())
 }
 
@@ -444,7 +444,7 @@ async fn guard(State(state): State<Arc<WebState>>, request: Request, next: Next)
         if !authorized {
             return error(
                 StatusCode::UNAUTHORIZED,
-                "Open this page using `arrakis-conversations open` on your laptop.",
+                "Open this page using `conversations open` on your laptop.",
             );
         }
     }

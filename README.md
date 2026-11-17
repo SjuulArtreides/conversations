@@ -38,8 +38,8 @@ authenticate, and start the host:
 ```sh
 export CONVERSATIONS_SERVER=http://localhost:8080
 cargo build --locked -p conversations-cli
-target/debug/arrakis-conversations login
-target/debug/arrakis-conversations host
+target/debug/conversations login
+target/debug/conversations host
 ```
 
 `CONVERSATIONS_SERVER` sets the same server as the global `--server` option.
@@ -49,12 +49,17 @@ prompt in a terminal.
 
 The host runs in the foreground and serves its local management UI on
 loopback. Open it from another shell that has the same
-`CONVERSATIONS_SERVER` with `target/debug/arrakis-conversations open`. To
+`CONVERSATIONS_SERVER` with `target/debug/conversations open`. To
 connect your browser and give
 someone else access to your host, follow the
 [trust onboarding walkthrough](docs/trust-onboarding.md).
 
-The executable retains its existing name, `arrakis-conversations`. Local
+To delegate work to another agent or exchange messages between sessions, see
+[handoffs and agent-to-agent communication](docs/agent-handoffs-and-messaging.md).
+
+The CLI executable is `conversations`. Its configuration and data
+directories keep their existing `arrakis-conversations` names, so existing
+logins and host state carry over. Local
 Claude Code, Codex, OpenCode, and cmux installations are separate prerequisites
 for the integrations you choose to use. The optional `adk code` launcher is
 an existing Arrakis DevKit integration, not a requirement for this application.

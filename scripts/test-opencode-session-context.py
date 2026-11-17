@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    cli = ROOT / "target/debug/arrakis-conversations"
+    cli = ROOT / "target/debug/conversations"
     sources = [str(uuid.uuid4()), str(uuid.uuid4())]
     natives = ["ses_context_" + uuid.uuid4().hex for _ in sources]
     metadata = {source: {"id": source, "agent": "opencode", "agent_session_id": native} for source, native in zip(sources, natives)}

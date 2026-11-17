@@ -95,7 +95,7 @@ impl IntoResponse for RelayError {
             RelayError::HostOffline => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "host_offline",
-                "That host is not connected. Start it with `arrakis-conversations host`.",
+                "That host is not connected. Start it with `conversations host`.",
             ),
             RelayError::Busy => (
                 StatusCode::TOO_MANY_REQUESTS,

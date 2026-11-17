@@ -35,7 +35,7 @@ async def main():
     if not args.server.startswith("http://127.0.0.1:"):
         parser.error("agent smoke tests require an explicit 127.0.0.1 HTTP server")
     cookie = args.cookie_file.read_text().strip()
-    cli = args.target_dir.resolve() / "debug/arrakis-conversations"
+    cli = args.target_dir.resolve() / "debug/conversations"
     (ROOT / "tmp").mkdir(exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix="agent-startup-", dir=ROOT / "tmp"))
 

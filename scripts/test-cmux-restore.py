@@ -17,7 +17,7 @@ import uuid
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("--cli", type=Path, default=root / "target/release/arrakis-conversations")
+parser.add_argument("--cli", type=Path, default=root / "target/release/conversations")
 parser.add_argument("--binding-kind", choices=["codex", "conversations"], default="conversations")
 parser.add_argument("--managed", action="store_true", help="Restore using persisted workspace identity with capture=0")
 parser.add_argument("--fail-inspection", action="store_true")

@@ -27,7 +27,7 @@ fn different_runtime_directories_cannot_start_competing_hosts() {
     let home = tempfile::tempdir().unwrap();
     let start = |runtime: &str| {
         Process(
-            Command::new(env!("CARGO_BIN_EXE_arrakis-conversations"))
+            Command::new(env!("CARGO_BIN_EXE_conversations"))
                 .env_remove("CONVERSATIONS_WRAPPED")
                 .env_remove("CONVERSATIONS_WRAPPER_PID")
                 .env_remove("CONVERSATIONS_HOST_CONTROL")

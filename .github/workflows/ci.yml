@@ -150,9 +150,9 @@ jobs:
 
       - name: Verify normal binaries for process fixtures
         run: |
-          test -x target/debug/arrakis-conversations
+          test -x target/debug/conversations
           test -x target/debug/conversations-server
-          target/debug/arrakis-conversations --version
+          target/debug/conversations --version
 
       - name: Install uv
         timeout-minutes: 2

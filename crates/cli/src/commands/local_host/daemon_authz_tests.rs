@@ -7820,7 +7820,7 @@ mod lifecycle {
         )
     }
 
-    /// An executable standing in for `arrakis-conversations`: it records that it
+    /// An executable standing in for `conversations`: it records that it
     /// was really spawned (pid and argv), and never registers anything.
     fn recording_executable(dir: &Path) -> PathBuf {
         let path = dir.join("recording-wrapper");

@@ -86,7 +86,7 @@ export function PullRequestsCard({ sessionId }: { sessionId: string }) {
         );
       } else {
         toast(
-          "No sync agent connected — run `arrakis-conversations host`",
+          "No sync agent connected — run `conversations host`",
           "error",
         );
       }
@@ -231,7 +231,7 @@ function PrRow({
           <span className="font-medium text-foreground">Sync now</span> (needs a
           connected{" "}
           <code className="rounded bg-muted px-1 py-px text-[0.7em]">
-            arrakis-conversations host
+            conversations host
           </code>
           )
         </p>

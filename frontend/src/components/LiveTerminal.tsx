@@ -2160,7 +2160,7 @@ export function LiveTerminal({
 
   const hint =
     conn === "connecting"
-      ? "Waiting for terminal output… (is `arrakis-conversations host` running with an up-to-date CLI?)"
+      ? "Waiting for terminal output… (is `conversations host` running with an up-to-date CLI?)"
       : conn === "error"
         ? "Live terminal unavailable for this session."
         : null;
@@ -2933,7 +2933,7 @@ function LivePrRail({ sessionId }: { sessionId: string }) {
         }, 2500);
       } else {
         toast(
-          "No sync agent connected — run `arrakis-conversations host`",
+          "No sync agent connected — run `conversations host`",
           "error",
         );
       }

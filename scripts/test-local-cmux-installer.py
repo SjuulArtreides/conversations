@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix="cmux-installer-", dir=root / "tmp") as 
     config.parent.mkdir()
     original = "# User configuration\nfont-size = 14\n"
     config.write_text(original)
-    cli = args.target_dir.resolve() / "debug/arrakis-conversations"
+    cli = args.target_dir.resolve() / "debug/conversations"
     runtime = folder / "host"
     settings_file = folder / "local-host.json"
     env_base = {**os.environ, "CONVERSATIONS_HOST_SETTINGS_FILE": str(settings_file)}

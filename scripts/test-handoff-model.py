@@ -143,7 +143,7 @@ exec direnv exec {home}/example adk "$@"
             return json.load(response)
 
     def status():
-        result = subprocess.run([str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime),
+        result = subprocess.run([str(target / "conversations"), "host", "--runtime-dir", str(runtime),
             "status", "--json"], capture_output=True, text=True, timeout=8, check=True)
         return json.loads(result.stdout)["sessions"]
 
@@ -179,7 +179,7 @@ exec direnv exec {home}/example adk "$@"
             workspaces.append(context["workspace_id"])
             environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"],
                 CMUX_WINDOW_ID=args.cmux_window, CMUX_BUNDLED_CLI_PATH=str(CMUX))
-        spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
+        spawn([str(target / "conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
             "--backend", args.backend, "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "local host socket")
         source = str(uuid.uuid4())
@@ -187,7 +187,7 @@ exec direnv exec {home}/example adk "$@"
         wait(lambda: any(s["launch"]["id"] == source for s in status()), "local source registration")
         log = open(scratch / "source-mcp.log", "w")
         logs.append(log)
-        mcp = Mcp(target / "arrakis-conversations", origin, source, log, cookie_file, env=environment)
+        mcp = Mcp(target / "conversations", origin, source, log, cookie_file, env=environment)
         clients.append(mcp)
 
         if "opencode" in args.case:
@@ -236,7 +236,7 @@ exec direnv exec {home}/example adk "$@"
             def codex_argv():
                 listing = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True).stdout
                 return next((line for line in listing.splitlines()
-                    if "codex" in line and args.codex_model in line and "arrakis-conversations" not in line), None)
+                    if "codex" in line and args.codex_model in line and str(target / "conversations") not in line), None)
             argv = wait(codex_argv, "codex process with --model", 30)
             assert f"--model {args.codex_model}" in argv and 'model_reasoning_effort="high"' in argv, argv
             results["codex"] = {"status": settled["status"], "argv": argv}

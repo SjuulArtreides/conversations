@@ -9,7 +9,7 @@ import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / "target/debug/arrakis-conversations"
+CLI = ROOT / "target/debug/conversations"
 INITIALIZE = json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
     "protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"startup-test","version":"1"}}}) + "\n"
 

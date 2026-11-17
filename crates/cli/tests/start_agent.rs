@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! `arrakis-conversations start-agent` as a real process under a real
+//! `conversations start-agent` as a real process under a real
 //! terminal, against a real local host and the real central server router, in
 //! an isolated user. A stub agent records its argv, the bytes its terminal
 //! delivers and its terminal size, and exits with a chosen code.
@@ -24,7 +24,7 @@ use conversations_server::{build_router_with_auth, AppState, Config, SqliteRepo}
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::{json, Value};
 
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 const ALICE: &str = "alice@example.com";
 /// Written by the stub agent into its transcript only.
 const TRANSCRIPT_MARK: &str = "transcriptmarkbryony";
@@ -135,7 +135,9 @@ impl Env {
                     "refusing to run: {system}/{agent} would shadow a missing stub"
                 );
             }
-            // The stub records the exact argument vector NUL-delimited in
+            // `mcp get` reports the personal Codex registration in
+            // `$HOME/codex-mcp.json`, if any. Otherwise the stub records the
+            // exact argument vector NUL-delimited in
             // `argv.<pid>`, and only then `pid wrapped-id agent argv`; a Claude stub
             // writes a transcript for the session it was told it is. It says
             // it is ready, appends the bytes its terminal delivers, reports its
@@ -147,8 +149,9 @@ impl Env {
                 &format!(
                     r#"#!/bin/sh
 case "$1 $2" in
-"mcp get") exit 1 ;;
+"mcp get") [ -f "$HOME/codex-mcp.json" ] && exec /bin/cat "$HOME/codex-mcp.json"; exit 1 ;;
 esac
+printf '%s' "${{CONVERSATIONS_CLI:-}}" > "{stubs}/cli.$$"
 printf '%s\0' "$@" > "{stubs}/argv.$$"
 echo "$$ ${{CONVERSATIONS_WRAPPED:--}} {agent} $*" >> "{stubs}/runs"
 id=""; prev=""
@@ -633,7 +636,7 @@ fn without_a_running_host_start_agent_fails_before_anything_starts() {
         let screen = terminal.screen();
         assert_ne!(terminal.exit_code(), Some(0), "{name}: {screen}");
         assert!(
-            screen.contains("start it with `arrakis-conversations host`"),
+            screen.contains("start it with `conversations host`"),
             "{name}: {screen}"
         );
         assert_eq!(terminal.mode("before"), terminal.mode("after"), "{name}");
@@ -757,6 +760,136 @@ fn start_agent_runs_in_the_invoking_terminal_as_a_registered_host_session() {
     assert_eq!(env.runs().len(), 1, "{:?}", env.runs());
     // The host keeps running after the agent exits.
     assert!(std::os::unix::net::UnixStream::connect(runtime.join("host.sock")).is_ok());
+}
+
+#[test]
+fn a_started_agent_reaches_conversations_through_the_conversations_executable() {
+    let mut env = Env::new();
+    let runtime = env.root().join("user-host");
+    env.start_host(&runtime, &["--backend", "normal"], &[]);
+    // The Codex stub has no personal registration, so the launch must load a
+    // launch-scoped Conversations MCP server.
+    let mut terminal = env.terminal("codex", &["start-agent", "codex"], &[]);
+    let context = || {
+        format!(
+            "terminal:\n{}\nhost:\n{}",
+            terminal.screen(),
+            env.host_log()
+        )
+    };
+    wait("the agent", || !env.runs().is_empty(), context);
+    let (pid, _, _) = env.runs()[0].clone();
+    let executable = Path::new(BIN).canonicalize().unwrap();
+    assert_eq!(executable.file_name().unwrap(), "conversations");
+    let argv = env.argv(pid);
+    let command = argv
+        .iter()
+        .find_map(|arg| arg.strip_prefix("mcp_servers.conversations.command="))
+        .unwrap_or_else(|| panic!("no launch-scoped MCP command: {argv:?}"));
+    let command: String = serde_json::from_str(command).unwrap();
+    assert_eq!(
+        Path::new(&command).canonicalize().unwrap(),
+        executable,
+        "{argv:?}"
+    );
+    // Hooks and agent plugins call back through CONVERSATIONS_CLI.
+    let cli = env.file(&format!("cli.{pid}"));
+    assert_eq!(
+        Path::new(&cli).canonicalize().unwrap(),
+        executable,
+        "CONVERSATIONS_CLI={cli:?}"
+    );
+    terminal.type_text("exit-seven\r");
+    wait(
+        "start-agent to return",
+        || terminal.exit_code().is_some(),
+        || terminal.screen(),
+    );
+    wait(
+        "the agent to exit",
+        || unsafe { libc::kill(pid, 0) } != 0,
+        || terminal.screen(),
+    );
+}
+
+/// A personal Codex or Claude registration is recognized when it names either
+/// the `conversations` executable or a still-installed `arrakis-conversations`
+/// one, and never when it names another program.
+#[test]
+fn personal_registrations_of_either_executable_name_are_recognized() {
+    let mut env = Env::new();
+    let runtime = env.root().join("user-host");
+    env.start_host(&runtime, &["--backend", "normal"], &[]);
+    let cases = [
+        ("/opt/conversations/bin/conversations", true),
+        ("/opt/old/bin/arrakis-conversations", true),
+        ("/opt/other/bin/other-mcp", false),
+    ];
+    for (command, recognized) in cases {
+        std::fs::write(
+            env.root().join("codex-mcp.json"),
+            json!({
+                "enabled": true,
+                "transport": {
+                    "type": "stdio",
+                    "command": command,
+                    "args": ["mcp", "serve", "--delivery", "codex"]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            env.root().join(".claude.json"),
+            json!({"mcpServers": {"conversations": {
+                "command": command,
+                "args": ["mcp", "serve", "--delivery", "claude"]
+            }}})
+            .to_string(),
+        )
+        .unwrap();
+        for agent in ["codex", "claude"] {
+            let started = env.runs().len();
+            let mut terminal = env.terminal(
+                &format!("{agent}-{}", started),
+                &["start-agent", agent],
+                &[],
+            );
+            wait(
+                "the agent",
+                || env.runs().len() > started,
+                || {
+                    format!(
+                        "terminal:\n{}\nhost:\n{}",
+                        terminal.screen(),
+                        env.host_log()
+                    )
+                },
+            );
+            let (pid, _, _) = env.runs()[started].clone();
+            let argv = env.argv(pid);
+            let ours = if agent == "codex" {
+                // Only an unrecognized registration gets a launch-scoped one.
+                !argv
+                    .iter()
+                    .any(|arg| arg.starts_with("mcp_servers.conversations.command="))
+            } else {
+                argv.iter().any(|arg| arg == "server:conversations")
+            };
+            assert_eq!(ours, recognized, "{agent} with {command}: {argv:?}");
+            terminal.type_text("exit-seven\r");
+            wait(
+                "start-agent to return",
+                || terminal.exit_code().is_some(),
+                || terminal.screen(),
+            );
+            wait(
+                "the agent to exit",
+                || unsafe { libc::kill(pid, 0) } != 0,
+                || terminal.screen(),
+            );
+        }
+    }
 }
 
 #[test]
@@ -1051,7 +1184,7 @@ fn a_running_host_without_in_place_sessions_is_refused_before_anything_starts() 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{name}: {stderr}");
         assert!(
-            stderr.contains("restart it with the current `arrakis-conversations host`"),
+            stderr.contains("restart it with the current `conversations host`"),
             "{name}: {stderr}"
         );
     }

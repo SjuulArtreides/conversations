@@ -48,7 +48,7 @@ def free_port():
 class Test:
     def __init__(self, target, folder):
         self.folder = folder
-        self.cli = target / "debug/arrakis-conversations"
+        self.cli = target / "debug/conversations"
         self.server = target / "debug/conversations-server"
         self.url = f"http://127.0.0.1:{free_port()}"
         self.cookie = ""

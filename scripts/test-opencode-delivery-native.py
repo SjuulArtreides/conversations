@@ -72,7 +72,7 @@ def main():
     parser.add_argument("--cwd", type=Path, required=True)
     parser.add_argument("--native-url", default="http://127.0.0.1:4096")
     parser.add_argument("--password-file", type=Path, required=True)
-    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/arrakis-conversations")
+    parser.add_argument("--cli", type=Path, default=ROOT / "target/debug/conversations")
     parser.add_argument("--server", type=Path, default=ROOT / "target/debug/conversations-server")
     args = parser.parse_args()
     assert not args.reply_tools or args.launcher == "raw", "Reply proof uses an isolated raw client location on the same shared OpenCode server"

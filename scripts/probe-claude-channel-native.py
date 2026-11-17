@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cli', type=Path, default=ROOT / 'target/debug/arrakis-conversations')
+    parser.add_argument('--cli', type=Path, default=ROOT / 'target/debug/conversations')
     parser.add_argument('--claude', default='claude')
     parser.add_argument('--scratch', type=Path, required=True, help='Owned directory under repo tmp for probe metadata')
     args = parser.parse_args()

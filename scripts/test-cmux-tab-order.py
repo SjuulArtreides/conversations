@@ -40,7 +40,7 @@ def main():
         return json.loads(result.stdout)
 
     def status():
-        result = subprocess.run([str(ROOT / "target/debug/arrakis-conversations"), "host",
+        result = subprocess.run([str(ROOT / "target/debug/conversations"), "host",
             "--runtime-dir", str(args.runtime_dir), "status", "--json"],
             check=True, capture_output=True, text=True, timeout=5)
         return json.loads(result.stdout)["sessions"]

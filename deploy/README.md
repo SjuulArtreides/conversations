@@ -72,7 +72,7 @@ rollout. The app is then at <http://localhost:8080>.
 
 ```sh
 curl http://localhost:8080/healthz
-arrakis-conversations --server http://localhost:8080 upload --all
+conversations --server http://localhost:8080 upload --all
 ```
 
 Tear down: `kind delete cluster --name arrakis-conversations`.

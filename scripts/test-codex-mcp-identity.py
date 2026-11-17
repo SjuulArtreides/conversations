@@ -65,7 +65,7 @@ class LocalFixture:
 
 
 def main():
-    cli = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "debug/arrakis-conversations"
+    cli = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "debug/conversations"
     (ROOT / "tmp").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="codex-mcp-", dir=ROOT / "tmp") as folder:
         scratch = Path(folder)

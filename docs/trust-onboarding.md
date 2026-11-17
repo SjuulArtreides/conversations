@@ -12,7 +12,7 @@ There are three separate steps, and only the last one grants anything:
   talk to.
 - **Trusting a browser key** on the host is the only step that grants access.
   It happens on the machine itself, in the local host page or with
-  `arrakis-conversations credential add`. Nothing on the server or in an
+  `conversations credential add`. Nothing on the server or in an
   account can grant it.
 
 A browser key belongs to one browser profile. A different browser, a new
@@ -26,19 +26,19 @@ profile or a private window has a different key, so it needs its own approval.
 
   ```sh
   export CONVERSATIONS_SERVER=https://conversations.example.com
-  arrakis-conversations login
-  arrakis-conversations host
+  conversations login
+  conversations host
   ```
 
   `CONVERSATIONS_SERVER` does the same as the global `--server <url>`
   option. Without either, a command uses the default saved by `login`, and
   `login` only offers to save one when it can prompt in a terminal. Every
   command in this guide must reach the same server.
-- **A running host.** `arrakis-conversations host` runs in the foreground on
+- **A running host.** `conversations host` runs in the foreground on
   the machine where your agents run. Its management UI listens on loopback
   only (`http://localhost:8089` by default). The host never opens a browser by
   itself.
-- **The current executable.** The executable is named `arrakis-conversations`.
+- **The current executable.** The executable is named `conversations`.
   After an upgrade, restart any host that is already running (see
   [Troubleshooting](#troubleshooting)).
 - **A normal browser profile.** Use the browser profile you will keep using. A
@@ -52,7 +52,7 @@ From a second shell on the host machine, with the same
 `CONVERSATIONS_SERVER`:
 
 ```sh
-arrakis-conversations open
+conversations open
 ```
 
 `open` prints the local address and opens your browser with a one-time link.
@@ -61,9 +61,9 @@ The page exchanges that link for a cookie and removes it from the address bar.
 - Don't copy or share the link.
 - If the browser didn't open, run `open` again rather than reusing an old link.
 
-![The local host page right after `arrakis-conversations open`](images/trust-onboarding/01-local-host-opened.png)
+![The local host page right after `conversations open`](images/trust-onboarding/01-local-host-opened.png)
 
-*1. The local host page, opened by `arrakis-conversations open`.*
+*1. The local host page, opened by `conversations open`.*
 
 Go to **Settings** (gear icon) → **Host access**. On a new host, **People with
 access** is empty.
@@ -74,7 +74,7 @@ access** is empty.
 
 Expand **Connection details** to see the **Host descriptor**, which starts
 with `chd1.`. It is public, and is the same value that
-`arrakis-conversations credential descriptor` prints.
+`conversations credential descriptor` prints.
 
 ![Connection details showing the host descriptor](images/trust-onboarding/03-local-connection-details.png)
 
@@ -288,7 +288,7 @@ The local page has no revoke button. On the host machine, revoke the exact
 fingerprint shown under **Key details**:
 
 ```sh
-arrakis-conversations credential revoke <full-fingerprint>
+conversations credential revoke <full-fingerprint>
 ```
 
 Revocation is permanent. As soon as the command records it:
@@ -332,10 +332,10 @@ On their side, the setup goes back to waiting for approval, and the
 ## Troubleshooting
 
 **The host isn't running.** The hosted setup shows **Machine connected** as
-*Offline* and asks you to start `arrakis-conversations host` on that machine.
+*Offline* and asks you to start `conversations host` on that machine.
 The page keeps checking while it is open. On the machine itself, `open` and
 `start-agent` fail with *no local host is answering in …; start it with
-`arrakis-conversations host`*.
+`conversations host`*.
 
 ![Hosted setup with the machine offline](images/trust-onboarding/23-hosted-host-offline.png)
 
@@ -343,7 +343,7 @@ The page keeps checking while it is open. On the machine itself, `open` and
 
 **An old host is still running after an upgrade.** `start-agent` fails with
 *the local host in … is too old for `start-agent`; restart it with the current
-`arrakis-conversations host`*. Stop the old host and start it again.
+`conversations host`*. Stop the old host and start it again.
 
 **No published key, or an unknown key.**
 - If **Add person** finds no one, ask the person to choose **Prepare this

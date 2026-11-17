@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The real `arrakis-conversations` binary, end to end on loopback: a host with
+//! The real `conversations` binary, end to end on loopback: a host with
 //! the normal backend, the real headless wrapper it spawns, and a stub `claude`
 //! that writes a transcript in Claude's own format. Nothing seeds the host's
 //! databases: the session record, the native binding and the history all come
@@ -44,7 +44,7 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{json, Value};
 
 const SESSION: &str = "3f1d2c9e-6f2a-4a53-9a0c-0c6d6f1d9b11";
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
 
 #[derive(Default)]
 struct CentralState {
@@ -395,7 +395,7 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
         self.host = Some(child);
     }
 
-    /// `arrakis-conversations <group> --runtime-dir <runtime> <args>` as the
+    /// `conversations <group> --runtime-dir <runtime> <args>` as the
     /// owner would run it, bounded: a command that starts serving instead of
     /// returning fails the test, and its process group ends with it.
     fn management(&self, group: &str, args: &[&str]) -> std::process::Output {
@@ -408,7 +408,7 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
             .unwrap_or_else(|error| panic!("{group} {args:?}: {error}"))
     }
 
-    /// `arrakis-conversations open` as the owner would run it.
+    /// `conversations open` as the owner would run it.
     fn open(&self, extra: &[&str]) -> std::process::Output {
         self.management("open", extra)
     }
@@ -1033,7 +1033,7 @@ fn management_commands_select_the_runtime_and_never_start_a_host() {
         assert!(!output.status.success(), "{group} {args:?}: {output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("start it with `arrakis-conversations host`"),
+            stderr.contains("start it with `conversations host`"),
             "{group} {args:?}: {stderr}"
         );
         assert!(!String::from_utf8_lossy(&output.stdout).contains("#token="));

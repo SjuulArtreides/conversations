@@ -1038,7 +1038,7 @@ pub fn start_agent(global: &GlobalOpts, args: &StartAgentArgs) -> Result<()> {
         .await
         .with_context(|| {
             format!(
-                "the local host in {} did not answer; start it with `arrakis-conversations host`",
+                "the local host in {} did not answer; start it with `conversations host`",
                 dir.display()
             )
         })??;
@@ -1050,7 +1050,7 @@ pub fn start_agent(global: &GlobalOpts, args: &StartAgentArgs) -> Result<()> {
             // An older host would move or detach this terminal's session.
             ServerMessage::Status { .. } => bail!(
                 "the local host in {} is too old for `start-agent`; restart it with the current \
-                 `arrakis-conversations host`",
+                 `conversations host`",
                 dir.display()
             ),
             ServerMessage::Error { message } => bail!("{message}"),
@@ -1115,8 +1115,8 @@ pub fn open(args: &OpenArgs) -> Result<()> {
             ServerMessage::WebBootstrap { url: None } => bail!(
                 "the running host is not serving its local web UI: it is turned off, or its port \
                  was unavailable when the host started (see the host's output). Turn it on with \
-                 `arrakis-conversations host configure --web true` (and `--web-port <PORT>` for a \
-                 free port), then restart `arrakis-conversations host`."
+                 `conversations host configure --web true` (and `--web-port <PORT>` for a \
+                 free port), then restart `conversations host`."
             ),
             ServerMessage::Error { message } => bail!("{message}"),
             _ => bail!("unexpected host response"),
@@ -1268,7 +1268,7 @@ pub(crate) async fn request(dir: &Path, message: ClientMessage) -> Result<Server
         .await
         .with_context(|| {
             format!(
-                "no local host is answering in {}; start it with `arrakis-conversations host`",
+                "no local host is answering in {}; start it with `conversations host`",
                 dir.display()
             )
         })?;

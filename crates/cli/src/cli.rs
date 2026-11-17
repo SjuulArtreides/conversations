@@ -1,4 +1,4 @@
-//! clap command-line interface definition for `arrakis-conversations`.
+//! clap command-line interface definition for `conversations`.
 
 use clap::{Args, Parser, Subcommand};
 use conversations_core::AgentKind;
@@ -13,7 +13,7 @@ pub const DEFAULT_SERVER: &str = "http://localhost:8080";
 
 /// Upload local Claude Code session histories to a conversations server.
 #[derive(Debug, Parser)]
-#[command(name = "arrakis-conversations", version = VERSION, about)]
+#[command(name = "conversations", version = VERSION, about)]
 pub struct Cli {
     #[command(flatten)]
     pub global: GlobalOpts,
@@ -185,7 +185,7 @@ mod tests {
     use clap::Parser;
 
     fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(std::iter::once("arrakis-conversations").chain(args.iter().copied()))
+        Cli::try_parse_from(std::iter::once("conversations").chain(args.iter().copied()))
             .unwrap_or_else(|error| panic!("{args:?}: {error}"))
     }
 
@@ -240,10 +240,8 @@ mod tests {
             &["host", "start"],
         ] {
             assert!(
-                Cli::try_parse_from(
-                    std::iter::once("arrakis-conversations").chain(args.iter().copied())
-                )
-                .is_err(),
+                Cli::try_parse_from(std::iter::once("conversations").chain(args.iter().copied()))
+                    .is_err(),
                 "{args:?}"
             );
         }

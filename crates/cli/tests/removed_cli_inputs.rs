@@ -12,7 +12,53 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use std::time::Duration;
 
-const BIN: &str = env!("CARGO_BIN_EXE_arrakis-conversations");
+const BIN: &str = env!("CARGO_BIN_EXE_conversations");
+
+/// The built executable presents itself as `conversations`, with exactly the
+/// current top-level commands and none of the removed ones.
+#[test]
+fn help_shows_the_conversations_command_and_its_current_commands() {
+    let output = Command::new(BIN)
+        .arg("--help")
+        .env_remove("CONVERSATIONS_SERVER")
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{help}");
+    assert!(
+        help.contains("\nUsage: conversations [OPTIONS] <COMMAND>\n"),
+        "{help}"
+    );
+    let commands: Vec<&str> = help
+        .split("\nCommands:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .unwrap_or_else(|| panic!("{help}"))
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        commands,
+        [
+            "mcp",
+            "list",
+            "upload",
+            "start-agent",
+            "host",
+            "open",
+            "credential",
+            "passkey",
+            "history",
+            "login",
+            "logout",
+            "ping",
+            "pr",
+            "help"
+        ],
+        "{help}"
+    );
+    assert!(!help.contains("arrakis-conversations"), "{help}");
+}
 
 #[test]
 fn removed_inputs_fail_at_parsing_before_launching_anything() {

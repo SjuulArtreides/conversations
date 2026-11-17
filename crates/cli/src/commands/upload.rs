@@ -1,4 +1,4 @@
-//! `arrakis-conversations upload` — discover, select, and publish sessions.
+//! `conversations upload` — discover, select, and publish sessions.
 //!
 //! Each selected session is ingested into local history (the canonical copy)
 //! and published to the server through the signed publication lifecycle, as

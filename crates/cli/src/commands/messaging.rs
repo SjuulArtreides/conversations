@@ -148,7 +148,7 @@ impl MessagingClient {
         let http = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(35))
-            .user_agent(concat!("arrakis-conversations/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("conversations/", env!("CARGO_PKG_VERSION")))
             .build()?;
         Ok(Self {
             http,

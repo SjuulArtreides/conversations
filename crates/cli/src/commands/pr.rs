@@ -1,4 +1,4 @@
-//! `arrakis-conversations pr sync` — re-read the pull requests this machine has
+//! `conversations pr sync` — re-read the pull requests this machine has
 //! been told about for a session, with the local `gh`, and push the snapshots
 //! when local intent allows it (see `local_host::github`): a private host
 //! session's PR content stays on this machine.
