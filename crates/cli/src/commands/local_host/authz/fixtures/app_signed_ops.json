@@ -1,0 +1,14 @@
+{
+  "_comment": "Produced by the SPA's own production module (frontend/src/lib/hostAuth.ts: loadBrowserKey, operationPayload, signPayload) running in Chrome 156 on macOS. The key is non-extractable and persisted in IndexedDB; start_b was signed after a page reload with the SAME key (same kid). Host audience = key id of the fixed test host identity (seed [7;32]); delegation id 00112233445566778899aabbccddeeff; iat 1800000000, exp +60s.",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+  "extractable": false,
+  "pub": "BEe8EuEmF/oEA0BKD9pubgweXVmXk8A1BTua0o9SrBwXzGg/87GmcBl1bPlqzroEca3goo7Z/5mS4msZBMVOSmE=",
+  "kid": "Le9Snp6PlY918qn__h5vb_vM4mTj-H61EyZV14bL2qg",
+  "host": "_oEsEvOrTOasXbaaw1L5BssbEe9D-zPiUu9_9VImOIk",
+  "dlg": "00112233445566778899aabbccddeeff",
+  "frames": {
+    "start_a": {"p": "eyJ2IjoxLCJ0eXAiOiJvcCIsImF1ZCI6Il9vRXNFdk9yVE9hc1hiYWF3MUw1QnNzYkVlOUQtelBpVXU5XzlWSW1PSWsiLCJraWQiOiJMZTlTbnA2UGxZOTE4cW5fX2g1dmJfdk00bVRqLUg2MUV5WlYxNGJMMnFnIiwiZGxnIjoiMDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmYiLCJvcCI6InNlc3Npb24uc3RhcnQiLCJzZXNzIjoiM2YxZDJjOWUtNmYyYS00YTUzLTlhMGMtMGM2ZDZmMWQ5YjExIiwianRpIjoiYThhZjg2ZTZkOWE4MDRlZTNhYTZhMWQ0NGRiNGZlNjEiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDA2MCwiYXJncyI6eyJzZXNzaW9uIjoiM2YxZDJjOWUtNmYyYS00YTUzLTlhMGMtMGM2ZDZmMWQ5YjExIiwiYWdlbnQiOiJjbGF1ZGUifX0", "s": "KStG9FfnrsVuk1Gbif-2rtzS6KZ3WQ98CNxhU8pRjsIIg8J18TkKSHtodP6pEOTr860kSxCGmh1p23SNCvYfmA", "k": "Le9Snp6PlY918qn__h5vb_vM4mTj-H61EyZV14bL2qg"},
+    "reopen_a": {"p": "eyJ2IjoxLCJ0eXAiOiJvcCIsImF1ZCI6Il9vRXNFdk9yVE9hc1hiYWF3MUw1QnNzYkVlOUQtelBpVXU5XzlWSW1PSWsiLCJraWQiOiJMZTlTbnA2UGxZOTE4cW5fX2g1dmJfdk00bVRqLUg2MUV5WlYxNGJMMnFnIiwiZGxnIjoiMDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmYiLCJvcCI6InNlc3Npb24ucmVvcGVuIiwic2VzcyI6IjNmMWQyYzllLTZmMmEtNGE1My05YTBjLTBjNmQ2ZjFkOWIxMSIsImp0aSI6ImYxZjVmYTNjODFjNzhiNmEzZDU2YWM2ZTVlYTNiYmRmIiwiaWF0IjoxODAwMDAwMDAwLCJleHAiOjE4MDAwMDAwNjAsImFyZ3MiOnsic2Vzc2lvbiI6IjNmMWQyYzllLTZmMmEtNGE1My05YTBjLTBjNmQ2ZjFkOWIxMSJ9fQ", "s": "ixICn_0CoHMKX7HbjQHwiCXRyqA_G4ldZpjbs-WzEN9bUrW-GDbZhNgCcAW4kYpIN3wWkhsgElrZKpbWxFPARw", "k": "Le9Snp6PlY918qn__h5vb_vM4mTj-H61EyZV14bL2qg"},
+    "start_b": {"p": "eyJ2IjoxLCJ0eXAiOiJvcCIsImF1ZCI6Il9vRXNFdk9yVE9hc1hiYWF3MUw1QnNzYkVlOUQtelBpVXU5XzlWSW1PSWsiLCJraWQiOiJMZTlTbnA2UGxZOTE4cW5fX2g1dmJfdk00bVRqLUg2MUV5WlYxNGJMMnFnIiwiZGxnIjoiMDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmYiLCJvcCI6InNlc3Npb24uc3RhcnQiLCJzZXNzIjoiNWUxYWViOTMtNWFiYS00MTllLTg4NTYtYTdjNzIxNDA2Mjc5IiwianRpIjoiNDU2MTEzMzE0YzQxMGUyOWI3NGNkMTQxMDU5NjQ5MjEiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDA2MCwiYXJncyI6eyJzZXNzaW9uIjoiNWUxYWViOTMtNWFiYS00MTllLTg4NTYtYTdjNzIxNDA2Mjc5IiwiYWdlbnQiOiJjbGF1ZGUifX0", "s": "BiWXrMRqXjUaklgqcmkXA7OEzL2m2k7iG8fYo176QtpoDSZKP7rWAEQYw9W51IZXwB4mancHX60FhkY9exUkuw", "k": "Le9Snp6PlY918qn__h5vb_vM4mTj-H61EyZV14bL2qg"}
+  }
+}

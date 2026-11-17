@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# kind overlay: base manifests + a NodePort so the cluster's extraPortMapping
+# (containerPort 30080 -> hostPort 8080) exposes the app at http://localhost:8080.
+resources:
+  - ../k8s
+patches:
+  - target:
+      kind: Service
+      name: conversations
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+  # Keep auth ON for local dev so live-session sharing + reply-back work
+  # (they require real identities). The base already sets it; the overlay pins
+  # it so a base change cannot silently open the kind cluster. Email+password
+  # login (PASSWORD_AUTH_ENABLED defaults true); no Google SSO. The session
+  # cookie is an unsigned opaque server-side id (no secret to set) and
+  # COOKIE_SECURE stays off over http://localhost.
+  - target:
+      kind: ConfigMap
+      name: conversations-config
+    patch: |-
+      - op: replace
+        path: /data/AUTH_ENABLED
+        value: "true"

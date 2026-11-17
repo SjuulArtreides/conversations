@@ -1,0 +1,7 @@
+{"timestamp":"2026-06-20T09:00:00.000Z","type":"session_meta","payload":{"id":"codex-sess-001","timestamp":"2026-06-20T09:00:00.000Z","cwd":"/Users/dev/proj","originator":"codex-tui","cli_version":"0.141.0","source":"cli","model_provider":"openai","git":{"branch":"feat/codex","repository_url":"git@example.com:org/proj.git"}}}
+{"timestamp":"2026-06-20T09:00:01.000Z","type":"turn_context","payload":{"cwd":"/Users/dev/proj","model":"gpt-5.5","effort":"high"}}
+{"timestamp":"2026-06-20T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Add Codex support"}]}}
+{"timestamp":"2026-06-20T09:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the current parser."}]}}
+{"timestamp":"2026-06-20T09:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-1","arguments":"{\"cmd\":\"rg codex\"}"}}
+{"timestamp":"2026-06-20T09:00:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"parser.rs: codex"}}
+{"timestamp":"2026-06-20T09:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Implemented."}]}}

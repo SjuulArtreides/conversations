@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conversations
+  namespace: arrakis-conversations
+  labels:
+    app: conversations
+spec:
+  # One replica: live connections and host relay state are held in memory.
+  replicas: 1
+  strategy:
+    type: Recreate # SQLite on RWO volume: avoid two pods mounting at once.
+  selector:
+    matchLabels:
+      app: conversations
+  template:
+    metadata:
+      labels:
+        app: conversations
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      # On SIGTERM the server fails /readyz immediately, sleeps SHUTDOWN_DRAIN_SECS
+      # (default 5) so the Service stops routing to this pod, then closes live SSE
+      # connections and drains in-flight requests. Give it ample headroom over that
+      # drain window before the kubelet SIGKILLs. No preStop hook is needed — the
+      # drain delay lives in the app, so it works regardless of the base image.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: conversations
+          image: arrakis-conversations:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: conversations-config
+          # Google SSO secret. Marked optional so the pod starts with
+          # email+password login only when the secret is absent.
+          env:
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: google-oidc
+                  key: GOOGLE_CLIENT_ID
+                  optional: true
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-oidc
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: true
+            # OpenRouter key — enables the LLM features (summary + chat). Marked
+            # optional so the pod starts without it (LLM features just stay off).
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openrouter
+                  key: OPENROUTER_API_KEY
+                  optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # Readiness touches the DB (/readyz → SELECT 1) so a pod with an
+          # unreachable/locked backend is pulled from the Service; on SIGTERM it
+          # also reports unready immediately so a terminating pod drains out of
+          # rotation. Liveness is DB-free (/readyz vs /healthz) so a transient DB
+          # blip never restarts the pod, and a draining pod is never killed by
+          # liveness before it finishes shutting down. periodSeconds is kept low
+          # so the readiness-based drain (for LBs that ignore the EndpointSlice
+          # terminating condition) lands inside SHUTDOWN_DRAIN_SECS.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: conversations-data

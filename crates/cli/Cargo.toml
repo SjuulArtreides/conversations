@@ -1,0 +1,65 @@
+[package]
+name = "conversations-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "arrakis-conversations"
+path = "src/main.rs"
+
+[dependencies]
+axum = { workspace = true }
+conversations-core = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+# Keep the async client (default) for the reply-SSE consumer AND the blocking
+# client for the existing upload/live paths — reqwest features are additive.
+reqwest = { workspace = true, features = ["blocking"] }
+# WebSocket client for the live-terminal socket (see terminal_ws.rs).
+tokio-tungstenite = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Signature verification for locally enrolled keys (already in the tree via rustls).
+ring = "0.17"
+# Maintained WebAuthn relying-party verifier (MPL-2.0); state serialisation is needed to persist pending ceremonies locally.
+webauthn-rs = { version = "0.6.2", features = ["danger-allow-state-serialisation"] }
+url = "2"
+futures = { workspace = true }
+dialoguer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+jsonc-parser = { version = "0.29.0", features = ["serde"] }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+indicatif = { workspace = true }
+dirs = { workspace = true }
+uuid = { workspace = true }
+portable-pty = "0.9.0"
+crossterm = "0.29.0"
+ctrlc = "3.5.2"
+base64 = { workspace = true }
+# Per-child local terminal-state parser for detached multiplexer children
+# (W1). Same major version the server depends on.
+vt100 = "0.16"
+unicode-width = "0.2.2"
+tempfile = "3.27.0"
+# Sans-IO WebRTC for the private browser channel (DTLS + SCTP data channel). Pure-Rust
+# crypto backend; keep the exact version pin for the private-channel protocol.
+str0m = { version = "=0.25.0", default-features = false, features = ["rust-crypto"] }
+# TURN client (RFC 5766/8656, UDP) for the native agent channel's relayed
+# candidate: str0m is sans-IO and has none. webrtc-rs, MIT/Apache-2.0, exact pins
+# are kept explicit; `webrtc-util` supplies its `Conn` abstraction.
+turn = "=0.17.2"
+webrtc-util = { version = "=0.17.2", default-features = false }
+
+rmcp = { version = "3.6.0", default-features = false, features = ["server", "macros", "transport-io"] }
+
+[target.'cfg(unix)'.dependencies]
+# SIGKILL for PTY children: portable-pty's cloned killer only sends SIGHUP.
+libc = "0.2.189"
+
+[dev-dependencies]
+# The REAL server router for cross-account relay tests (no stub in between).
+conversations-server = { path = "../server" }
+webauthn-authenticator-rs = { version = "0.6.2", default-features = false, features = ["softpasskey"] }

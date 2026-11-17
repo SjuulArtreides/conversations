@@ -1,0 +1,12 @@
+-- v20 (container repo flag): mark a repo link as a monorepo "container".
+--
+-- A container is a git repo that itself contains nested git repos (the
+-- monorepo root, e.g. `arrakis-heighliner`). The CLI detects this structurally
+-- (a child directory is itself a git work tree) and sets the flag per link.
+--
+-- A container link is EXCLUDED from single-repo PR-context resolution
+-- (`repo_ctx_from_links`), so a bare `PR #N` in a session whose only repo is
+-- the monorepo never links to a non-existent top-level PR. This is the
+-- automatic, structural counterpart to the per-user `user_container_paths`
+-- (0015) opt-in — neither deletes the link; both are resolution filters only.
+ALTER TABLE session_repos ADD COLUMN is_container INTEGER NOT NULL DEFAULT 0;

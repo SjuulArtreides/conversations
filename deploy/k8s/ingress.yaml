@@ -1,0 +1,22 @@
+# Optional Ingress. Requires an ingress controller (e.g. ingress-nginx).
+# For kind, the test script uses port-forward instead, so this is not applied
+# by the kustomization by default — apply manually if you have a controller.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: conversations
+  namespace: arrakis-conversations
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
+spec:
+  rules:
+    - host: conversations.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: conversations
+                port:
+                  number: 80

@@ -1,0 +1,1 @@
+ALTER TABLE live_session_shares ADD COLUMN IF NOT EXISTS can_control BOOLEAN NOT NULL DEFAULT false;

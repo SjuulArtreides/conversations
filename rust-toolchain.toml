@@ -1,0 +1,4 @@
+[toolchain]
+# Keep local and CI cargo commands on the production image toolchain.
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,7 @@
+{"type":"last-prompt","lastPrompt":"Show the current model","sessionId":"metadata-example"}
+{"type":"mode","mode":"default","sessionId":"metadata-example"}
+{"type":"permission-mode","mode":"default","sessionId":"metadata-example"}
+{"type":"attachment","attachment":{"type":"hook_success","content":"OK"},"uuid":"metadata-hook","timestamp":"2026-01-01T12:00:00.000Z","cwd":"/Users/developer/example","sessionId":"metadata-example","version":"2.1.152","gitBranch":"main"}
+{"type":"file-history-snapshot","snapshot":{"messageId":"metadata-command","trackedFileBackups":{}}}
+{"type":"user","uuid":"metadata-command","parentUuid":null,"timestamp":"2026-01-01T12:00:01.000Z","cwd":"/Users/developer/example","sessionId":"metadata-example","message":{"role":"user","content":"<command-name>/model</command-name>"}}
+{"type":"user","uuid":"metadata-output","parentUuid":"metadata-command","timestamp":"2026-01-01T12:00:02.000Z","cwd":"/Users/developer/example","sessionId":"metadata-example","message":{"role":"user","content":"<local-command-stdout>Example model selected</local-command-stdout>"}}

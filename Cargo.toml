@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/server", "crates/cli"]
+exclude = ["vendor/vt100"]
+
+[workspace.package]
+# The initial public snapshot preserves the source application's version.
+version = "0.69.1"
+edition = "2021"
+license = "MIT"
+authors = ["Arrakis Engineering"]
+repository = "https://github.com/SjuulArtreides/conversations"
+
+[workspace.dependencies]
+conversations-core = { path = "crates/core" }
+
+# async runtime / web
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "compression-gzip"] }
+# Pinned to 0.14 (not 0.15) so it shares `tower-sessions-core` 0.14 with
+# `tower-sessions-sqlx-store` 0.15 — the latest sqlx store still targets core
+# 0.14, and the `SessionStore` trait impls only line up on a shared core.
+tower-sessions = "0.14"
+tower-sessions-sqlx-store = { version = "0.15", features = ["sqlite", "postgres"] }
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    # TLS for Postgres: RDS requires `sslmode=require`. Use ring and the OS
+    # trust store (ca-certificates).
+    "tls-rustls-ring-native-roots",
+    "sqlite",
+    "postgres",
+    "macros",
+    "migrate",
+    "chrono",
+] }
+
+# cli / http client
+clap = { version = "4", features = ["derive", "env"] }
+# Use the platform verifier so the client honors the OS certificate trust store.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+# WebSocket client for the CLI live-terminal socket (PTY-out / keystroke-in).
+# Use native roots to match the HTTP client's OS certificate trust store.
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+dialoguer = "0.12"
+
+# auth
+openidconnect = "4"
+cookie = "0.18"
+bcrypt = "0.19"
+
+# utilities
+async-trait = "0.1"
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+dirs = "7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"
+tokio-stream = "0.1"
+indicatif = "0.18"
+base64 = "0.23"
+
+# Preserve OSC 8 targets in host repaints and server snapshots.
+[patch.crates-io]
+vt100 = { path = "vendor/vt100" }

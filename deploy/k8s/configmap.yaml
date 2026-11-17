@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conversations-config
+  namespace: arrakis-conversations
+data:
+  BIND_ADDR: "0.0.0.0:8080"
+  # Default storage: SQLite on the mounted PVC. To use Postgres instead, set
+  # DATABASE_URL to a postgres:// URL (and provision a Postgres — see deploy/README.md).
+  DATABASE_URL: "sqlite:///data/conversations.db?mode=rwc"
+  STATIC_DIR: "/app/static"
+  RUST_LOG: "info"
+  # Graceful-shutdown drain: after SIGTERM the server fails /readyz, waits this
+  # many seconds for the Service/LB to stop routing, then closes connections.
+  # Kept above the readiness removal time (periodSeconds 3 × failureThreshold 2
+  # = ~6s) so the pod has left rotation before connections are torn down, and
+  # well under terminationGracePeriodSeconds (60). The app default is 5.
+  SHUTDOWN_DRAIN_SECS: "10"
+  # Auth is ON (the server default; stated here so the posture is explicit).
+  # With nothing else set, this enables EMAIL+PASSWORD login
+  # (PASSWORD_AUTH_ENABLED defaults to true) — no Google config required.
+  # There is no email verification. Never set "false" on a reachable deploy:
+  # it removes all authentication and authorization.
+  AUTH_ENABLED: "true"
+  # PASSWORD_AUTH_ENABLED: "true"   # default; set "false" to require Google SSO only
+  # Existing bootstrap administrators. They can grant admin access to other
+  # users in the app. Because password registration has no email verification,
+  # create each account before adding it here; these addresses cannot
+  # self-register and cannot be revoked in the app.
+  # INITIAL_ADMIN_EMAILS: "admin@example.com"
+  #
+  # Google SSO is OPTIONAL and ALL-OR-NOTHING: to enable it, provide the
+  # google-oidc Secret (GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET) AND uncomment
+  # OIDC_REDIRECT_URL below. Leaving only the redirect URL set (with no client
+  # id/secret) is rejected as a partial config — keep it commented for
+  # password-only auth.
+  # OIDC_REDIRECT_URL: "http://localhost:8080/auth/callback"

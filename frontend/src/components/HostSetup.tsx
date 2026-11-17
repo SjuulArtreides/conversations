@@ -1,0 +1,563 @@
+import * as React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useBrowserPublication } from "@/lib/browserPublication";
+import { inspectHostAccess } from "@/lib/hostSetup";
+import { toBase64 } from "@/lib/hostAuth";
+import {
+  closePrivateChannels,
+  HostControlError,
+  hostOnline,
+  unlockAgain,
+} from "@/lib/hostControl";
+import {
+  activeHost,
+  isPinned,
+  pairHost,
+  selectHost,
+  usePairedHosts,
+} from "@/lib/hostPairing";
+
+function usePageVisible() {
+  const [visible, setVisible] = React.useState(
+    document.visibilityState !== "hidden",
+  );
+  React.useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  return visible;
+}
+
+function Step({
+  title,
+  status,
+  complete,
+  current,
+}: {
+  title: string;
+  status: string;
+  complete: boolean;
+  current: boolean;
+}) {
+  return (
+    <li
+      aria-current={current ? "step" : undefined}
+      className={`flex items-start gap-3 rounded-lg border p-3 ${current && !complete ? "border-primary bg-primary/5" : "border-border/70"}`}
+    >
+      <span
+        aria-hidden="true"
+        className={complete ? "text-green-600" : "text-muted-foreground"}
+      >
+        {complete ? "✓" : current ? "●" : "○"}
+      </span>
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{status}</p>
+      </div>
+    </li>
+  );
+}
+
+export function HostSetup({ active = true }: { active?: boolean }) {
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const pairing = usePairedHosts();
+  const host = pairing.hosts.find(
+    (candidate) => candidate.id === pairing.active,
+  );
+  const mode = host?.authMode ?? "passkey";
+  const visible = usePageVisible();
+  const polling = active && visible && !!host && isPinned(host);
+  const publication = useBrowserPublication();
+  const [descriptor, setDescriptor] = React.useState("");
+  const [machineName, setMachineName] = React.useState("");
+  const [browserName, setBrowserName] = React.useState("My browser");
+  const [publishedName, setPublishedName] = React.useState("My browser");
+  const [nameUpdated, setNameUpdated] = React.useState(false);
+  const [pairingError, setPairingError] = React.useState<string | null>(null);
+  const [unlockError, setUnlockError] = React.useState<string | null>(null);
+  const [unlocking, setUnlocking] = React.useState(false);
+  const unlockAttempt = React.useRef(0);
+  const [copyStatus, setCopyStatus] = React.useState<string | null>(null);
+  const online = useQuery({
+    queryKey: ["host-setup-status", host?.id, mode],
+    queryFn: () => hostOnline(host!.id),
+    enabled: polling,
+    refetchInterval: polling ? 5000 : false,
+    retry: false,
+    gcTime: 0,
+  });
+  const access = useQuery({
+    queryKey: ["host-setup-access", host?.id, mode],
+    queryFn: () => inspectHostAccess(host!.id),
+    enabled: polling && online.isSuccess && online.data === true,
+    refetchInterval:
+      polling && online.isSuccess && online.data === true ? 5000 : false,
+    retry: false,
+    gcTime: 0,
+  });
+  const accessCode =
+    access.error instanceof HostControlError ? access.error.code : null;
+  const connected =
+    online.isSuccess && online.data === true && accessCode !== "offline";
+  const verified = connected && access.isSuccess;
+  const ready = verified && access.data.canRead && access.data.canStart;
+  const identity = `${host?.id ?? ""}:${mode}`;
+  const previous = React.useRef({ identity: "", ready: false });
+  React.useEffect(() => {
+    if (
+      ready &&
+      (previous.current.identity !== identity || !previous.current.ready)
+    ) {
+      void client.invalidateQueries({ queryKey: ["private", host!.id] });
+      void client.invalidateQueries({ queryKey: ["host-launch-settings"] });
+    }
+    previous.current = { identity, ready };
+  }, [ready, identity, host, client]);
+  React.useEffect(() => {
+    unlockAttempt.current += 1;
+    setUnlockError(null);
+    setUnlocking(false);
+    return () => {
+      unlockAttempt.current += 1;
+    };
+  }, [identity]);
+
+  const connect = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPairingError(null);
+    try {
+      closePrivateChannels();
+      await pairHost(descriptor, machineName, "browser-key");
+      setDescriptor("");
+      setMachineName("");
+    } catch (error) {
+      setPairingError((error as Error).message);
+    }
+  };
+  const publishBrowser = (updating = false) => {
+    const submittedName = browserName;
+    publication.publish.mutate(submittedName, {
+      onSuccess: () => {
+        setPublishedName(submittedName);
+        setNameUpdated(updating);
+      },
+    });
+  };
+  const unlock = async () => {
+    if (!host) return;
+    const attempt = ++unlockAttempt.current;
+    const current = () => {
+      const selected = activeHost();
+      return (
+        attempt === unlockAttempt.current &&
+        selected?.id === host.id &&
+        (selected.authMode ?? "passkey") === mode
+      );
+    };
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      await unlockAgain(host.id);
+      if (!current()) return;
+      await client.invalidateQueries({
+        queryKey: ["host-setup-access", host.id, mode],
+      });
+      await client.invalidateQueries({
+        queryKey: ["host-delegation", host.id],
+      });
+    } catch (error) {
+      if (current()) setUnlockError((error as Error).message);
+    } finally {
+      if (current()) setUnlocking(false);
+    }
+  };
+
+  const checking =
+    !!host &&
+    isPinned(host) &&
+    (online.isPending || (connected && access.isPending));
+  const offline =
+    !!host &&
+    ((online.isSuccess && online.data === false) || accessCode === "offline");
+  const refusal = accessCode === "refused" ? (access.error?.message ?? "") : "";
+  const identityDenied =
+    /unknown, revoked or expired credential or delegation|does not have an approved owner credential|(?:credential|browser key|key) (?:is |was )?(?:unknown|revoked|expired|not approved)/i.test(
+      refusal,
+    );
+  const approvalNeeded =
+    connected && access.isError && (accessCode === "locked" || identityDenied);
+  const refusalReview =
+    connected && accessCode === "refused" && !identityDenied;
+  const insufficientPermissions =
+    /no current grant|capability outside credential ceiling|operation outside.*delegation.*scope|only an owner credential may change session metadata/i.test(
+      refusal,
+    );
+  const reviewNeeded = verified && !ready;
+  const waiting =
+    approvalNeeded &&
+    mode === "browser-key" &&
+    publication.registration.data === true;
+  const problem =
+    online.error ??
+    (access.isError && !approvalNeeded && !refusalReview && !offline
+      ? access.error
+      : null);
+  const approvalCommand = publication.key.data
+    ? [
+        "arrakis-conversations host credential add --kind owner --alg es256",
+        `--public-key ${toBase64(publication.key.data.publicRaw)}`,
+        `--label '${browserName.replaceAll("'", "'\"'\"'")}'`,
+        ...[
+          "history.read",
+          "session.start",
+          "session.reopen",
+          "session.write",
+          "session.pr_comment",
+          "session.manage_sharing",
+          "host.settings_read",
+          "host.settings_write",
+          "passkey.manage",
+        ].map((grant) => `--grant ${grant}`),
+      ].join(" ")
+    : "";
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Copied.");
+    } catch {
+      setCopyStatus("Could not copy. Select and copy the text directly.");
+    }
+  };
+  const machineStatus = !host
+    ? "Not connected"
+    : !isPinned(host)
+      ? "Identity needs repair"
+      : offline
+        ? "Offline"
+        : online.isPending
+          ? "Checking connection…"
+          : online.isError
+            ? "Connection check failed"
+            : "Online";
+  const browserStatus = ready
+    ? "Approved for reading and starting sessions"
+    : reviewNeeded
+      ? "Needs review — permissions are limited"
+      : refusalReview
+        ? insufficientPermissions
+          ? "Needs review — current permissions are insufficient"
+          : "Approval or permissions need review"
+        : !host || !connected
+          ? "Waiting for machine connection"
+          : checking
+            ? "Checking browser approval…"
+            : mode === "passkey" && approvalNeeded
+              ? "Locked — unlock with your passkey"
+              : waiting
+                ? "Waiting for approval on your machine"
+                : problem
+                  ? "Could not verify approval"
+                  : "Not approved";
+
+  return (
+    <section aria-labelledby="host-setup-heading" className="space-y-5">
+      <div>
+        <h2 id="host-setup-heading" className="text-lg font-semibold">
+          Set up your machine
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Connect a machine, then approve this browser on that machine. Being
+          online does not grant browser access.
+        </p>
+      </div>
+      {pairing.hosts.length > 1 ? (
+        <label className="block text-sm">
+          Machine
+          <select
+            className="ml-2 rounded border bg-background p-1"
+            value={host?.id ?? ""}
+            onChange={(event) => selectHost(event.target.value)}
+          >
+            {pairing.hosts.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        host && <p className="text-sm font-medium">Machine: {host.label}</p>
+      )}
+      <ol
+        aria-label="Host setup progress"
+        className="grid gap-3 sm:grid-cols-3"
+      >
+        <Step
+          title="Machine connected"
+          status={machineStatus}
+          complete={connected}
+          current={!connected}
+        />
+        <Step
+          title="Browser approved"
+          status={browserStatus}
+          complete={verified}
+          current={connected && !verified}
+        />
+        <Step
+          title="Ready to use"
+          status={
+            ready ? "Read history and start sessions" : "Finish the steps above"
+          }
+          complete={ready}
+          current={verified && !ready}
+        />
+      </ol>
+      {!host && (
+        <form onSubmit={(event) => void connect(event)} className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            On the machine where your agents run, start{" "}
+            <code>arrakis-conversations host run</code>. Copy its public
+            descriptor with{" "}
+            <code>arrakis-conversations host credential descriptor</code>.
+          </p>
+          <label className="block text-sm">
+            Host descriptor
+            <Input
+              value={descriptor}
+              onChange={(event) => setDescriptor(event.target.value)}
+              placeholder="chd1.…"
+              className="font-mono text-xs"
+            />
+          </label>
+          <label className="block text-sm">
+            Machine name
+            <Input
+              value={machineName}
+              onChange={(event) => setMachineName(event.target.value)}
+              placeholder="My laptop or Coder"
+            />
+          </label>
+          <Button type="submit" disabled={!descriptor.trim()}>
+            Connect machine
+          </Button>
+          {pairingError && (
+            <p role="alert" className="text-sm text-destructive">
+              {pairingError}
+            </p>
+          )}
+        </form>
+      )}
+      {host && !isPinned(host) && (
+        <p role="alert" className="text-sm text-destructive">
+          This machine has no pinned identity key. Open Advanced, forget it, and
+          connect it again with its public descriptor.
+        </p>
+      )}
+      {offline && (
+        <p role="status" className="text-sm">
+          Start <code>arrakis-conversations host run</code> on{" "}
+          <strong>{host!.label}</strong>. This page checks automatically while
+          open.
+        </p>
+      )}
+      {checking && (
+        <p role="status" className="text-sm">
+          {online.isPending
+            ? "Checking the machine connection…"
+            : "Checking this browser’s access with the machine…"}
+        </p>
+      )}
+      {problem && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not verify this connection: {(problem as Error).message}
+        </p>
+      )}
+      {(!host || mode === "browser-key") && !ready && (
+        <div className="space-y-3">
+          <label className="block text-sm">
+            Browser name
+            <Input
+              value={browserName}
+              maxLength={80}
+              onChange={(event) => {
+                setBrowserName(event.target.value);
+                setNameUpdated(false);
+              }}
+            />
+          </label>
+          {approvalNeeded && !waiting && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Prepare this browser’s public key so the owner of{" "}
+                <strong>{host!.label}</strong> can compare and approve it
+                locally.
+              </p>
+              <Button
+                disabled={
+                  publication.key.isPending ||
+                  publication.key.isError ||
+                  publication.registration.isPending ||
+                  publication.publish.isPending ||
+                  !browserName.trim()
+                }
+                onClick={() => publishBrowser()}
+              >
+                {publication.publish.isPending
+                  ? "Preparing browser…"
+                  : "Prepare this browser for approval"}
+              </Button>
+            </>
+          )}
+          {publication.registration.data === true &&
+            browserName !== publishedName && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={publication.publish.isPending || !browserName.trim()}
+                onClick={() => publishBrowser(true)}
+              >
+                {publication.publish.isPending
+                  ? "Updating browser name…"
+                  : "Update browser name"}
+              </Button>
+            )}
+          {publication.registration.data === true &&
+            nameUpdated &&
+            browserName === publishedName && (
+              <p role="status" className="text-sm">
+                Browser name updated.
+              </p>
+            )}
+          {publication.key.error && (
+            <p role="alert" className="text-sm text-destructive">
+              Could not read this browser’s key: {publication.key.error.message}
+            </p>
+          )}
+          {publication.registration.error && (
+            <p role="alert" className="text-sm text-destructive">
+              Could not check browser publication:{" "}
+              {publication.registration.error.message}
+            </p>
+          )}
+          {publication.publish.error && (
+            <p role="alert" className="text-sm text-destructive">
+              Could not prepare this browser:{" "}
+              {publication.publish.error.message}
+            </p>
+          )}
+          {waiting && publication.key.data && (
+            <div className="space-y-2 rounded-lg border border-border p-4 text-sm">
+              <p role="status">
+                Waiting for browser approval on <strong>{host!.label}</strong>.
+              </p>
+              <p>Publication does not notify this machine or grant access.</p>
+              <ol className="list-decimal space-y-2 pl-5">
+                <li>
+                  On <strong>{host!.label}</strong>, open its local host page.
+                  Under <strong>Access to this host</strong>, choose{" "}
+                  <strong>Add person</strong> and find this browser.
+                </li>
+                <li>
+                  Compare this fingerprint. Allow reading history, starting
+                  sessions and controlling running terminals, then choose{" "}
+                  <strong>Trust public key</strong>.
+                </li>
+              </ol>
+              <code className="block break-all select-all text-xs">
+                {publication.key.data.kid}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void copy(publication.key.data!.kid)}
+              >
+                Copy fingerprint
+              </Button>
+              <details className="space-y-2">
+                <summary className="cursor-pointer font-medium">
+                  Terminal approval instructions
+                </summary>
+                <p>
+                  On {host!.label}, compare the fingerprint first, then run this
+                  command to approve this browser with the standard owner
+                  permissions.
+                </p>
+                <code className="block break-all select-all text-xs">
+                  {approvalCommand}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void copy(approvalCommand)}
+                >
+                  Copy approval command
+                </Button>
+              </details>
+              {copyStatus && <p role="status">{copyStatus}</p>}
+              <p>This page detects approval automatically while open.</p>
+            </div>
+          )}
+        </div>
+      )}
+      {approvalNeeded && mode === "passkey" && (
+        <div className="space-y-2">
+          <p className="text-sm">
+            Unlock this browser’s existing passkey access to {host!.label}.
+          </p>
+          <Button disabled={unlocking} onClick={() => void unlock()}>
+            {unlocking ? "Unlocking…" : "Unlock with passkey"}
+          </Button>
+          {unlockError && (
+            <p role="alert" className="text-sm text-destructive">
+              {unlockError}
+            </p>
+          )}
+        </div>
+      )}
+      {refusalReview && (
+        <div role="alert" className="space-y-2 text-sm text-destructive">
+          <p>
+            {insufficientPermissions
+              ? "Permissions need review"
+              : "Approval or permissions need review"}{" "}
+            on {host!.label}.
+          </p>
+          <p>{access.error!.message}</p>
+          <p>
+            On {host!.label}, open <strong>Access to this host</strong> and
+            review this browser’s current permissions. This check could not
+            verify enough access to continue.
+          </p>
+        </div>
+      )}
+      {reviewNeeded && (
+        <p role="status" className="text-sm">
+          This browser’s approved permissions need review on {host!.label}.{" "}
+          {access.data.canRead
+            ? "History reading is allowed."
+            : "History reading is not allowed."}{" "}
+          {access.data.canStart
+            ? "Session starts are allowed."
+            : "Session starts are not allowed."}{" "}
+          Ask the machine owner to review its local grants in Access to this
+          host.
+        </p>
+      )}
+      {ready && (
+        <div className="space-y-3">
+          <p role="status" className="text-sm">
+            {host!.label} verified this browser can read history and start
+            sessions.
+          </p>
+          <Button onClick={() => navigate("/")}>Go to sessions</Button>
+        </div>
+      )}
+    </section>
+  );
+}

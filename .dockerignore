@@ -1,0 +1,15 @@
+/target
+**/target
+/frontend/node_modules
+/frontend/dist
+/frontend/.vite
+.git
+.env
+.env.*
+.direnv
+/data
+*.sqlite
+*.sqlite-*
+plans
+deploy/k8s/secret.yaml
+result

@@ -1,0 +1,26 @@
+/target
+**/*.rs.bk
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.env
+.env.*
+!.env.example
+.DS_Store
+/data
+/tmp
+
+# frontend
+/frontend/node_modules
+/frontend/dist
+/frontend/.vite
+# TypeScript incremental build cache (regenerated locally; must not be committed)
+*.tsbuildinfo
+
+# k8s secrets (never commit real secrets)
+/deploy/k8s/secret.yaml
+
+# nix
+.direnv/
+result

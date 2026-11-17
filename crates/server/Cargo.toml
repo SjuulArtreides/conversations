@@ -1,0 +1,48 @@
+[package]
+name = "conversations-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "conversations_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "conversations-server"
+path = "src/main.rs"
+
+[dependencies]
+conversations-core = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tower-sessions = { workspace = true }
+tower-sessions-sqlx-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+openidconnect = { workspace = true }
+cookie = { workspace = true }
+bcrypt = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+base64 = { workspace = true }
+# Verifies a host's key-possession proof when it attaches to the relay.
+ring = "0.17"
+vt100 = "0.16"
+http-body-util = "0.1"
+
+[dev-dependencies]
+tower = { workspace = true }
+time = "0.3"
+tokio-tungstenite = { workspace = true }

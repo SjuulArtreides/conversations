@@ -1,0 +1,5 @@
+[profile.ci]
+test-threads = 4
+# Report a test as slow after each minute and terminate it after ten, so a hung
+# test fails with its name and output instead of reaching the job timeout.
+slow-timeout = { period = "60s", terminate-after = 10 }

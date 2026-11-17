@@ -1,0 +1,116 @@
+{
+  "info": {
+    "id": "ses_opencode_001",
+    "slug": "bright-dune",
+    "directory": "/Users/dev/proj",
+    "title": "Add OpenCode support",
+    "version": "1.18.18",
+    "time": {
+      "created": 1786965000000,
+      "updated": 1786965060000
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "id": "msg_user_001",
+        "sessionID": "ses_opencode_001",
+        "role": "user",
+        "time": { "created": 1786965001000 },
+        "agent": "build",
+        "model": {
+          "providerID": "openai",
+          "modelID": "gpt-5.6-terra"
+        }
+      },
+      "parts": [
+        {
+          "id": "prt_user_text",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_user_001",
+          "type": "text",
+          "text": "Please add OpenCode support."
+        }
+      ]
+    },
+    {
+      "info": {
+        "id": "msg_assistant_001",
+        "sessionID": "ses_opencode_001",
+        "parentID": "msg_user_001",
+        "role": "assistant",
+        "modelID": "gpt-5.6-terra",
+        "providerID": "openai",
+        "time": {
+          "created": 1786965002000,
+          "completed": 1786965060000
+        },
+        "tokens": {
+          "input": 1200,
+          "output": 340,
+          "reasoning": 50,
+          "cache": { "read": 800, "write": 20 }
+        }
+      },
+      "parts": [
+        {
+          "id": "prt_step",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_assistant_001",
+          "type": "step-start"
+        },
+        {
+          "id": "prt_reasoning",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_assistant_001",
+          "type": "reasoning",
+          "text": "Inspecting the existing agent seam."
+        },
+        {
+          "id": "prt_tool",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_assistant_001",
+          "type": "tool",
+          "callID": "call_rg",
+          "tool": "bash",
+          "state": {
+            "status": "completed",
+            "input": { "command": "rg AgentKind" },
+            "output": "crates/core/src/model.rs"
+          }
+        },
+        {
+          "id": "prt_text",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_assistant_001",
+          "type": "text",
+          "text": "OpenCode is now available."
+        },
+        {
+          "id": "prt_future",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_assistant_001",
+          "type": "some-future-part",
+          "payload": { "visible": true }
+        }
+      ]
+    },
+    {
+      "info": {
+        "id": "msg_unsupported_001",
+        "sessionID": "ses_opencode_001",
+        "role": "system",
+        "time": { "created": 1786965061000 }
+      },
+      "parts": [
+        {
+          "id": "prt_unsupported_text",
+          "sessionID": "ses_opencode_001",
+          "messageID": "msg_unsupported_001",
+          "type": "text",
+          "text": "Internal bookkeeping"
+        }
+      ]
+    }
+  ]
+}
