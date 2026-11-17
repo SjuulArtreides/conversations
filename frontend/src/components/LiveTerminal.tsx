@@ -2933,7 +2933,7 @@ function LivePrRail({ sessionId }: { sessionId: string }) {
         }, 2500);
       } else {
         toast(
-          "No sync agent connected — run `arrakis-conversations host run`",
+          "No sync agent connected — run `arrakis-conversations host`",
           "error",
         );
       }

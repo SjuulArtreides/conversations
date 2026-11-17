@@ -99,7 +99,7 @@ def main():
             with open(cookie_file, "w", opener=lambda p, f: os.open(p, f, 0o600)) as output:
                 output.write(cookie)
             command = [str(cli), "--server", url, "host", "--runtime-dir", str(runtime),
-                       "run", "--backend", args.backend or "cmux", "--cookie-file", str(cookie_file)]
+                       "--backend", args.backend or "cmux", "--cookie-file", str(cookie_file)]
             launch = sandbox / "start-host.sh"
             launch.write_text("#!/bin/sh\ncd " + shlex.quote(str(root)) + "\nexec " + shlex.join(command) + "\n")
             launch.chmod(0o700)

@@ -2,7 +2,7 @@
 //! Agent-to-agent messages between two REAL hosts travel on the encrypted
 //! private channel, end to end: a REAL central server in process (router,
 //! relay, SQLite, plus a recorder and optional hostile rewrites), REAL
-//! `arrakis-conversations host run` processes, REAL `mcp serve` processes as
+//! `arrakis-conversations host` processes, REAL `mcp serve` processes as
 //! the agents run them, and recording stub `claude` agents. Only the agents are
 //! stubbed; relay, crypto, hosts, wrappers and local databases are real.
 //!

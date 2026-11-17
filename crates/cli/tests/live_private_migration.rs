@@ -444,9 +444,10 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
     }
 
     /// `host --runtime-dir <host_dir> <args>`.
-    fn host_cli(&self, args: &[&str]) -> (bool, String, String) {
+    /// `<group> --runtime-dir <host dir> <args>`, e.g. `host status`.
+    fn runtime_cli(&self, group: &str, args: &[&str]) -> (bool, String, String) {
         let dir = self.host_dir().display().to_string();
-        let mut full = vec!["host", "--runtime-dir", dir.as_str()];
+        let mut full = vec![group, "--runtime-dir", dir.as_str()];
         full.extend_from_slice(args);
         self.cli(&full)
     }
@@ -570,7 +571,7 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 
     /// The running local host's registered terminals: `(id, agent)`.
     fn host_sessions(&self) -> Vec<(String, String)> {
-        let (ok, stdout, _) = self.host_cli(&["status", "--json"]);
+        let (ok, stdout, _) = self.runtime_cli("host", &["status", "--json"]);
         if !ok {
             return Vec::new();
         }
@@ -591,7 +592,7 @@ if (-d $d) {{ open my $done, ">", "$d/done.$$"; print $done "exited"; }}
 
     /// The local history of `session` as text.
     fn history(&self, session: &str) -> String {
-        let (_, stdout, _) = self.host_cli(&["history", "get", session, "--json"]);
+        let (_, stdout, _) = self.runtime_cli("history", &["get", session, "--json"]);
         stdout
     }
 
@@ -765,7 +766,7 @@ fn live_registers_with_the_host_already_running_and_leaves_it_running() {
     let mut host = Owned(
         env.command(&["host", "--runtime-dir"])
             .arg(&runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1138,7 +1139,7 @@ fn upload_resends_the_identical_request_after_a_lost_acknowledgement() {
     let ids = published_ids(&env, session);
     let expected: Vec<String> = (0..1200).map(|n| format!("{session}-m{n}")).collect();
     assert_eq!(ids, expected);
-    let (_, status, _) = env.host_cli(&["history", "status", session]);
+    let (_, status, _) = env.runtime_cli("history", &["status", session]);
     assert!(status.contains("shared"), "{status}");
 }
 
@@ -1158,7 +1159,7 @@ fn upload_and_the_running_host_publish_one_request_at_a_time() {
     let _host = Owned(
         env.command(&["host", "--runtime-dir"])
             .arg(&runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1176,7 +1177,7 @@ fn upload_and_the_running_host_publish_one_request_at_a_time() {
     assert_eq!(published_ids(&env, session), expected);
     // Let the host's loop run over the finished publication too.
     std::thread::sleep(Duration::from_secs(3));
-    let (_, status, _) = env.host_cli(&["history", "status", session]);
+    let (_, status, _) = env.runtime_cli("history", &["status", session]);
     assert!(
         status.contains("shared") && !status.contains("error"),
         "{status}"

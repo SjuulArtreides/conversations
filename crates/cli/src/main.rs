@@ -37,6 +37,18 @@ fn initialize_tls() {
 fn main() -> ExitCode {
     initialize_tls();
     let mut args = Cli::parse();
+    #[cfg(unix)]
+    if let Command::Host(host) = &args.command {
+        if let Some(option) = host.startup_conflict() {
+            use clap::CommandFactory;
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!("{option} starts bare `host` and cannot be used with a subcommand"),
+                )
+                .exit();
+        }
+    }
     // Resolve the effective server once, up front: an explicit `--server` /
     // `CONVERSATIONS_SERVER` wins, then the saved default server, then the
     // built-in fallback. Every subcommand reads `global.server` from here.
@@ -55,6 +67,14 @@ fn main() -> ExitCode {
         Command::Live(live_args) => commands::live::run(&args.global, live_args),
         #[cfg(unix)]
         Command::Host(host_args) => commands::local_host::run(&args.global, host_args),
+        #[cfg(unix)]
+        Command::Open(open_args) => commands::local_host::open(open_args),
+        #[cfg(unix)]
+        Command::Credential(credential_args) => commands::local_host::credential(credential_args),
+        #[cfg(unix)]
+        Command::Passkey(passkey_args) => commands::local_host::passkey(&args.global, passkey_args),
+        #[cfg(unix)]
+        Command::History(history_args) => commands::local_host::history(&args.global, history_args),
         Command::Login(login_args) => commands::login::run(&args.global, login_args),
         Command::Logout => commands::login::logout(&args.global),
         Command::Ping => commands::ping::run(&args.global),

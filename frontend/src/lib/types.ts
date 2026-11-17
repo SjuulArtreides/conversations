@@ -592,7 +592,7 @@ export interface PrReplyResult {
 
 /**
  * Result of relaying a PR sync (`POST /api/sessions/{id}/prs/sync`).
- * `delivered:false` means no CLI agent (`host run` / `live --host`) is attached
+ * `delivered:false` means no CLI agent (`host` / `live --host`) is attached
  * to run `gh` and push the refreshed status + comments.
  */
 export interface PrSyncResult {

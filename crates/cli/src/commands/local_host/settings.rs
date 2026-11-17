@@ -47,8 +47,7 @@ pub const DEFAULT_WEB_PORT: u16 = 8089;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebSettings {
-    /// Start the web UI when the host starts. An explicit `host web` still
-    /// starts a standalone one when this is off.
+    /// Start the web UI when the host starts; `open` needs it.
     #[serde(default = "default_web_enabled")]
     pub enabled: bool,
     /// Loopback port. A port already serving something else is never taken

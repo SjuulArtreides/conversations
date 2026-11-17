@@ -470,7 +470,7 @@ impl Rig {
     }
 }
 
-/// `host credential revoke` without the host notification (the store call the
+/// `credential revoke` without the host notification (the store call the
 /// CLI makes first; nothing is interrupted).
 fn revoke_credential(rig: &Rig, kid: &str) {
     Store::open(rig.dir())
@@ -479,7 +479,7 @@ fn revoke_credential(rig: &Rig, kid: &str) {
         .unwrap();
 }
 
-/// The whole `host credential revoke` path (store, then the running host's
+/// The whole `credential revoke` path (store, then the running host's
 /// interruptions), on its own thread: it runs its own runtime.
 async fn cli_revoke(
     dir: &Path,

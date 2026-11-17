@@ -5,7 +5,7 @@
 //! read-only metadata (title, order, the stored transcript tail); it has no
 //! channel back: nothing the server stores or relays reaches a session's
 //! process, terminal or arguments. Web control of this machine exists only as
-//! signed operations on the private channel to the local host (`host run`).
+//! signed operations on the private channel to the local host (`host`).
 //!
 //!   - **`live` (default)** seeds the user's OWN local session as the first child
 //!     of the mux (focused). It exits once the user closes their last session
@@ -402,7 +402,7 @@ async fn host_loop(
     if args.host {
         live_info!(
             "conversations host: local sessions only — web start, re-open, input and end \
-             need the signed local host (`arrakis-conversations host run`)"
+             need the signed local host (`arrakis-conversations host`)"
         );
     }
 

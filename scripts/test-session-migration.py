@@ -60,10 +60,21 @@ class Host:
         bootstrap = self.home / "bootstrap"
         bootstrap.unlink(missing_ok=True)
         self.base = f"http://127.0.0.1:{port()}"
+        settings = self.home / "settings.json"
+        values = json.loads(settings.read_text()) if settings.exists() else {}
+        values["web"] = dict(values.get("web", {}), port=int(self.base.rsplit(":", 1)[1]))
+        settings.write_text(json.dumps(values))
         self.process = subprocess.Popen([str(self.cli), "--server", "http://127.0.0.1:1", "host",
-            "--runtime-dir", str(self.runtime), "web", "--port", self.base.rsplit(":", 1)[1]],
+            "--runtime-dir", str(self.runtime)],
             cwd=self.project, env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 15
+        # The host never opens a browser itself; ask it for a fresh owner link.
+        while subprocess.run([str(self.cli), "open", "--runtime-dir",
+                str(self.runtime)], cwd=self.project, env=self.env, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=20).returncode != 0:
+            assert self.process.poll() is None, "test host failed to start"
+            assert time.monotonic() < deadline, "test host did not answer open"
+            time.sleep(0.1)
         while not bootstrap.exists():
             assert self.process.poll() is None, "test host failed to start"
             assert time.monotonic() < deadline, "test host did not produce a bootstrap link"

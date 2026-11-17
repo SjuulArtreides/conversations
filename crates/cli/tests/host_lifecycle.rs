@@ -372,7 +372,7 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
             .command()
             .args(["--server", &self.server, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -387,7 +387,7 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
             .command()
             .args(["--server", &self.server, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .stdout(Stdio::null())
             .stderr(Stdio::from(file))
             .spawn()
@@ -395,15 +395,55 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
         self.host = Some(child);
     }
 
-    /// `arrakis-conversations host web` as the owner would run it.
-    fn host_web(&self, extra: &[&str]) -> std::process::Output {
+    /// `arrakis-conversations <group> --runtime-dir <runtime> <args>` as the
+    /// owner would run it, bounded: a command that starts serving instead of
+    /// returning fails the test, and its process group ends with it.
+    fn management(&self, group: &str, args: &[&str]) -> std::process::Output {
         let mut command = self.command();
         command
-            .args(["--server", &self.server, "host", "--runtime-dir"])
+            .args(["--server", &self.server, group, "--runtime-dir"])
             .arg(&self.runtime)
-            .arg("web");
-        command.args(extra);
-        command.output().unwrap()
+            .args(args);
+        owned_process::run(&mut command, b"", Duration::from_secs(20))
+            .unwrap_or_else(|error| panic!("{group} {args:?}: {error}"))
+    }
+
+    /// `arrakis-conversations open` as the owner would run it.
+    fn open(&self, extra: &[&str]) -> std::process::Output {
+        self.management("open", extra)
+    }
+
+    /// A successful `open`, ending its process group only once the stub
+    /// opener has recorded the link: `open` does not wait for the launcher it
+    /// spawns, and ending the group as soon as `open` exits would kill it.
+    fn open_in_browser(&self, extra: &[&str]) -> std::process::Output {
+        use std::io::Seek;
+        let (mut stdout, mut stderr) =
+            (tempfile::tempfile().unwrap(), tempfile::tempfile().unwrap());
+        let open = owned_process::Owned::spawn(
+            self.command()
+                .args(["--server", &self.server, "open", "--runtime-dir"])
+                .arg(&self.runtime)
+                .args(extra)
+                .stdin(Stdio::null())
+                .stdout(stdout.try_clone().unwrap())
+                .stderr(stderr.try_clone().unwrap()),
+        );
+        wait("the opener to record the owner link", || {
+            open.exited() && self.home.path().join("open.args").exists()
+        });
+        let status = open.finish(Duration::from_secs(1)).unwrap();
+        let read = |file: &mut std::fs::File| {
+            let mut bytes = Vec::new();
+            file.rewind().unwrap();
+            file.read_to_end(&mut bytes).unwrap();
+            bytes
+        };
+        std::process::Output {
+            status,
+            stdout: read(&mut stdout),
+            stderr: read(&mut stderr),
+        }
     }
 
     fn start_host(&mut self) {
@@ -441,19 +481,15 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
 
     /// Approve a key locally with the real CLI; returns its stdout.
     fn add_credential(&self, alg: Option<&str>, public_key: &str, grants: &[String]) -> String {
-        let mut command = self.command();
-        command
-            .args(["--server", &self.server, "host", "--runtime-dir"])
-            .arg(&self.runtime)
-            .args(["credential", "add", "--kind", "owner"]);
+        let mut args = vec!["add", "--kind", "owner"];
         if let Some(alg) = alg {
-            command.args(["--alg", alg]);
+            args.extend(["--alg", alg]);
         }
-        command.args(["--public-key", public_key, "--label", "it"]);
+        args.extend(["--public-key", public_key, "--label", "it"]);
         for grant in grants {
-            command.args(["--grant", grant]);
+            args.extend(["--grant", grant]);
         }
-        let output = command.output().unwrap();
+        let output = self.management("credential", &args);
         assert!(
             output.status.success(),
             "{}",
@@ -481,13 +517,7 @@ exec /usr/bin/perl "{stubs}/recorder.pl" "{stubs}"
     }
 
     fn host_id(&self) -> String {
-        let output = self
-            .command()
-            .args(["host", "--runtime-dir"])
-            .arg(&self.runtime)
-            .args(["credential", "identity"])
-            .output()
-            .unwrap();
+        let output = self.management("credential", &["identity"]);
         assert!(output.status.success(), "{output:?}");
         String::from_utf8_lossy(&output.stdout)
             .split_whitespace()
@@ -728,10 +758,23 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
             .status,
         403
     );
-    // A fresh installation opens setup without a separate `host web` command.
-    wait("the first host start to open browser setup", || {
-        env.home.path().join("open.args").exists()
-    });
+    // Starting the host never launches a browser, even on a fresh
+    // installation; only an explicit `open` does.
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !env.home.path().join("open.args").exists(),
+        "host startup opened a browser"
+    );
+    let output = env.open_in_browser(&[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("#token="),
+        "the owner link reached stdout"
+    );
     let (_link, token) = recorded_owner_link(env.home.path(), port);
     // The one-time token unlocks this browser exactly once.
     let origin = format!("http://127.0.0.1:{port}");
@@ -775,7 +818,7 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
     assert_eq!(status.status, 200);
     assert!(status.body.contains("chd1."), "{}", status.body);
 
-    // Restart keeps browser access and does not open another setup tab.
+    // Restart keeps browser access and opens no browser either.
     std::fs::remove_file(env.home.path().join("open.args")).unwrap();
     env.stop_everything();
     wait("the web port to be released", || {
@@ -795,9 +838,9 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
     );
     assert!(
         !env.home.path().join("open.args").exists(),
-        "restart reopened browser setup"
+        "host restart opened a browser"
     );
-    let output = env.host_web(&[]);
+    let output = env.open_in_browser(&[]);
     assert!(
         output.status.success(),
         "{}",
@@ -806,9 +849,6 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
     let said = String::from_utf8_lossy(&output.stdout);
     assert!(said.contains(&format!("Local host management: http://localhost:{port}/")));
     assert!(!said.contains("#token="), "the owner link reached stdout");
-    wait("the opener to record the fresh owner link", || {
-        env.home.path().join("open.args").exists()
-    });
     let (_link, token) = recorded_owner_link(env.home.path(), port);
     let unlock_body = json!({"token": token}).to_string();
     let unlock = web_request(
@@ -821,7 +861,7 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
     .unwrap();
     assert_eq!(unlock.status, 200, "no fresh owner link after the restart");
     std::fs::remove_file(env.home.path().join("open.args")).unwrap();
-    let reset = env.host_web(&["--reset-browser-access"]);
+    let reset = env.open_in_browser(&["--reset-browser-access"]);
     assert!(reset.status.success());
     assert_eq!(
         web_request(port, "GET", "/api/status", &[("Cookie", &cookie)], None)
@@ -829,9 +869,6 @@ fn the_loopback_web_ui_starts_with_the_host_keeps_owner_auth_and_returns_after_a
             .status,
         401
     );
-    wait("the replacement browser setup", || {
-        env.home.path().join("open.args").exists()
-    });
     let (_, replacement) = recorded_owner_link(env.home.path(), port);
     assert_eq!(
         web_request(
@@ -856,13 +893,24 @@ fn a_missing_browser_does_not_prevent_host_or_web_startup() {
     std::fs::remove_file(env.stubs.join("browser")).unwrap();
     let log = env.home.path().join("host.log");
     env.spawn_host_logged(&log);
-    wait("the browser recovery instruction", || {
-        std::fs::read_to_string(&log).is_ok_and(|text| text.contains("CONVERSATIONS_BROWSER"))
-    });
     wait("the web UI without a browser launcher", || {
         web_get(env.web_port, "/api/local").is_some_and(|r| r.status == 200)
     });
     assert_eq!(web_get(env.web_port, "/api/status").unwrap().status, 401);
+    // Only an explicit `open` needs the launcher, and it says how to fix it.
+    let output = env.open(&[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("CONVERSATIONS_BROWSER"), "{stderr}");
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("#token="),
+        "the owner link reached stdout"
+    );
+    let host_log = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        !host_log.contains("CONVERSATIONS_BROWSER"),
+        "host startup tried to open a browser: {host_log}"
+    );
 }
 
 #[test]
@@ -913,22 +961,123 @@ fn an_occupied_web_port_neither_blocks_host_startup_nor_is_taken_over() {
     }
     assert!(logged.contains("host configure --web-port"), "{logged}");
 
-    // An explicit `host web` refuses to take the port over as well, and the
-    // foreign service outlives the attempt.
-    let output = env.host_web(&["--port", &port.to_string()]);
+    // `open` asks the running host, which serves no UI here: it says how to
+    // get one and never serves the port itself or opens a browser.
+    let output = env.open(&[]);
     assert!(
         !output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if has_shared_frontend() {
-        assert!(stderr.contains("already serving it?"), "{stderr}");
-    } else {
-        assert!(stderr.contains("no shared frontend"), "{stderr}");
-    }
-    assert_foreign_alive("the foreign service to outlive the `host web` attempt");
+    assert!(stderr.contains("not serving its local web UI"), "{stderr}");
+    assert!(stderr.contains("host configure --web"), "{stderr}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("#token="));
+    assert!(
+        !env.home.path().join("open.args").exists(),
+        "a browser was opened"
+    );
+    assert_foreign_alive("the foreign service to outlive the `open` attempt");
     env.stop_everything();
+}
+
+#[test]
+fn open_without_a_served_ui_fails_clearly_and_never_serves_one_itself() {
+    let mut env = Env::new();
+    std::fs::write(
+        env.settings.as_ref().unwrap(),
+        json!({"web": {"enabled": false, "port": env.web_port}}).to_string(),
+    )
+    .unwrap();
+    env.start_host();
+    for extra in [&[][..], &["--reset-browser-access"]] {
+        let output = env.open(extra);
+        assert!(!output.status.success(), "{extra:?}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("not serving its local web UI"), "{stderr}");
+        assert!(stderr.contains("host configure --web true"), "{stderr}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("#token="));
+    }
+    assert!(
+        !env.home.path().join("open.args").exists(),
+        "a browser was opened"
+    );
+    assert!(
+        web_get(env.web_port, "/api/local").is_none(),
+        "something serves the disabled UI's port"
+    );
+}
+
+#[test]
+fn management_commands_select_the_runtime_and_never_start_a_host() {
+    let env = Env::new();
+    let socket = env.runtime.join("host.sock");
+    // Offline approval state is read from the selected runtime, chosen by flag
+    // or by environment, without a host.
+    let identity = env.host_id();
+    let mut command = env.command();
+    command
+        .env("CONVERSATIONS_HOST_DIR", &env.runtime)
+        .args(["credential", "identity"]);
+    let output = owned_process::run(&mut command, b"", Duration::from_secs(20)).unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), identity);
+    // Commands answered by the host say how to start it, and start nothing.
+    for (group, args) in [
+        ("host", &["status"][..]),
+        ("passkey", &["pending"]),
+        ("open", &[]),
+        ("open", &["--reset-browser-access"]),
+    ] {
+        let output = env.management(group, args);
+        assert!(!output.status.success(), "{group} {args:?}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("start it with `arrakis-conversations host`"),
+            "{group} {args:?}: {stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("#token="));
+        assert!(!socket.exists(), "{group} {args:?} started a host");
+    }
+    assert!(
+        !env.home.path().join("open.args").exists(),
+        "a browser was opened"
+    );
+    assert!(
+        web_get(env.web_port, "/api/local").is_none(),
+        "a management command served the web UI"
+    );
+    assert!(!env.home.path().join(".conversations-host-local").exists());
+}
+
+#[test]
+fn hoisted_management_reaches_a_running_host_in_a_custom_runtime() {
+    let mut env = Env::new();
+    env.start_host();
+    start_locally(&env);
+    wait("local history", || history_holds_the_transcript(&env));
+    let get = env.management("history", &["get", SESSION, "--json"]);
+    assert!(get.status.success(), "{get:?}");
+    assert!(String::from_utf8_lossy(&get.stdout).contains("xylophone"));
+    let mut command = env.command();
+    command
+        .env("CONVERSATIONS_HOST_DIR", &env.runtime)
+        .args(["history", "search", "xylophone"]);
+    let search = owned_process::run(&mut command, b"", Duration::from_secs(20)).unwrap();
+    assert!(search.status.success(), "{search:?}");
+    assert!(String::from_utf8_lossy(&search.stdout).contains("xylophone"));
+    // The running host itself answers: this fixture configures no passkeys.
+    let pending = env.management("passkey", &["pending"]);
+    assert!(
+        String::from_utf8_lossy(&pending.stderr).contains("passkeys are not configured"),
+        "{pending:?}"
+    );
+    let status = env.management("host", &["status", "--json"]);
+    assert!(status.status.success(), "{status:?}");
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(status.to_string().contains(SESSION), "{status}");
+    // Nothing fell back to the default runtime.
+    assert!(!env.home.path().join(".conversations-host-local").exists());
 }
 
 /// Run an opt-in journey over the real private channel. A missing browser or
@@ -1464,9 +1613,9 @@ fn revoking_a_credential_cancels_its_running_work_and_the_same_agent_takes_a_lat
 
         let output = env
             .command()
-            .args(["--server", &env.server, "host", "--runtime-dir"])
+            .args(["--server", &env.server, "credential", "--runtime-dir"])
             .arg(&env.runtime)
-            .args(["credential", "revoke", &guest_kid])
+            .args(["revoke", &guest_kid])
             .output()
             .unwrap();
         let said = String::from_utf8_lossy(&output.stdout).to_string();
@@ -1550,14 +1699,7 @@ fn key_with_id_prefix(prefix: &str) -> (String, String) {
 fn credentials_whose_ids_start_with_hyphens_can_be_revoked() {
     let env = Env::new();
     let revoke = |args: &[&str]| -> Value {
-        let output = env
-            .command()
-            .args(["host", "--runtime-dir"])
-            .arg(&env.runtime)
-            .args(["credential", "revoke"])
-            .args(args)
-            .output()
-            .unwrap();
+        let output = env.management("credential", &[&["revoke"][..], args].concat());
         assert!(
             output.status.success(),
             "{args:?}: {}",

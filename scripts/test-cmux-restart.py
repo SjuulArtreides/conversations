@@ -285,7 +285,6 @@ async def test():
                 "host",
                 "--runtime-dir",
                 str(t.host_dir),
-                "run",
                 "--backend",
                 "cmux",
                 "--cookie-file",

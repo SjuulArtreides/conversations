@@ -1,4 +1,5 @@
-//! Opt-in local daemon. Existing `live` hosts do not use this module.
+//! Opt-in local daemon (`host`) and the commands that manage it. Existing
+//! `live` hosts do not use this module.
 mod access_metadata;
 pub(crate) mod agent_link;
 pub(crate) mod authz;
@@ -55,13 +56,104 @@ fn configured_directory(path: &Path, option: &str) -> Result<PathBuf> {
     Ok(directory)
 }
 
-#[derive(Debug, Args)]
-pub struct HostArgs {
+/// The private runtime directory a command acts on.
+#[derive(Debug, Args, Clone, Default)]
+pub struct RuntimeDirArgs {
     /// Private runtime directory shared by this host and its wrappers.
     #[arg(long, global = true, env = "CONVERSATIONS_HOST_DIR")]
     pub runtime_dir: Option<PathBuf>,
+}
+
+impl RuntimeDirArgs {
+    fn resolve(&self) -> Result<PathBuf> {
+        let dir = self.runtime_dir.clone().unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".conversations-host-local")
+        });
+        Ok(std::path::absolute(dir)?)
+    }
+}
+
+/// Run the local host in the foreground, or manage it with a subcommand.
+#[derive(Debug, Args)]
+pub struct HostArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    #[command(flatten)]
+    pub startup: HostStartup,
     #[command(subcommand)]
-    pub command: HostCommand,
+    pub command: Option<HostCommand>,
+}
+
+impl HostArgs {
+    /// Startup options select how bare `host` runs; with a subcommand they
+    /// would be silently ignored.
+    pub fn startup_conflict(&self) -> Option<&'static str> {
+        let used = [
+            self.startup.backend.is_some().then_some("--backend"),
+            self.startup.cmux_bin.is_some().then_some("--cmux-bin"),
+            self.startup
+                .cookie_file
+                .is_some()
+                .then_some("--cookie-file"),
+        ];
+        self.command
+            .as_ref()
+            .and_then(|_| used.into_iter().flatten().next())
+    }
+}
+
+/// Startup options of the foreground host.
+#[derive(Debug, Args, Default)]
+pub struct HostStartup {
+    /// Terminal backend [default: auto: cmux inside a reachable cmux
+    /// workspace, otherwise normal].
+    #[arg(long, value_enum)]
+    pub backend: Option<Backend>,
+    /// Override cmux CLI discovery (useful for isolated compatibility tests).
+    #[arg(long)]
+    pub cmux_bin: Option<PathBuf>,
+    /// Read the localhost session cookie from an owner-only file, without changing saved login defaults.
+    #[arg(long)]
+    pub cookie_file: Option<PathBuf>,
+}
+
+/// Top-level `credential`.
+#[derive(Debug, Args)]
+pub struct CredentialArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    #[command(subcommand)]
+    pub command: CredentialCommand,
+}
+
+/// Top-level `passkey`.
+#[derive(Debug, Args)]
+pub struct PasskeyArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    #[command(subcommand)]
+    pub command: PasskeyCommand,
+}
+
+/// Top-level `history`.
+#[derive(Debug, Args)]
+pub struct HistoryArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    #[command(subcommand)]
+    pub command: HistoryCommand,
+}
+
+/// Top-level `open`.
+#[derive(Debug, Args)]
+pub struct OpenArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    /// Revoke every remembered browser and active local terminal connection, then open setup.
+    #[arg(long)]
+    pub reset_browser_access: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -85,34 +177,6 @@ pub enum HostCommand {
         /// Remove only the Conversations startup command block.
         #[arg(long)]
         uninstall: bool,
-    },
-    /// Open owner-only host management in your browser (loopback only). The
-    /// running host already serves it; this mints a fresh one-time owner link.
-    /// Without a running host (or with the UI disabled) it starts a
-    /// standalone one in the foreground.
-    Web {
-        /// Local HTTP port.
-        #[arg(long, default_value_t = settings::DEFAULT_WEB_PORT)]
-        port: u16,
-        /// Revoke every remembered browser and active local terminal connection, then open setup.
-        #[arg(long)]
-        reset_browser_access: bool,
-    },
-    /// Locally approved credentials that may sign remote operations for this host.
-    Credential {
-        #[command(subcommand)]
-        command: CredentialCommand,
-    },
-    /// Passkey enrollment and browser delegation, performed by the running host
-    /// over its owner-only socket.
-    Passkey {
-        #[command(subcommand)]
-        command: PasskeyCommand,
-    },
-    /// Read local transcript history or import owned server histories.
-    History {
-        #[command(subcommand)]
-        command: HistoryCommand,
     },
     /// Show or update this local host's persistent startup settings.
     Configure {
@@ -145,18 +209,6 @@ pub enum HostCommand {
     Shell {
         #[arg(last = true)]
         command: Vec<String>,
-    },
-    /// Run the localhost daemon in the foreground. The default auto-detects a
-    /// usable cmux terminal and otherwise selects the normal backend.
-    Run {
-        #[arg(long, value_enum, default_value = "auto")]
-        backend: Backend,
-        /// Override cmux CLI discovery (useful for isolated compatibility tests).
-        #[arg(long)]
-        cmux_bin: Option<PathBuf>,
-        /// Read the localhost session cookie from an owner-only file, without changing saved login defaults.
-        #[arg(long)]
-        cookie_file: Option<PathBuf>,
     },
     /// Wrap a terminal command; defaults to the login shell. Does not contact the server.
     Wrap {
@@ -365,20 +417,20 @@ pub enum Backend {
     Cmux,
 }
 
+/// Bare `host` runs the daemon in the foreground; a subcommand manages it
+/// and never starts one.
 pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
-    let dir = args.runtime_dir.clone().unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".conversations-host-local")
-    });
-    let dir = std::path::absolute(dir)?;
-    if let HostCommand::OpencodeBridge { launch_id, command } = &args.command {
+    let dir = args.runtime.resolve()?;
+    let Some(command) = &args.command else {
+        return run_daemon(global, &dir, &args.startup);
+    };
+    if let HostCommand::OpencodeBridge { launch_id, command } = command {
         return opencode_bridge::exec(&dir, &launch_id.to_string(), command);
     }
     if let HostCommand::AgentHook {
         launch_id,
         wrapper_pid,
-    } = &args.command
+    } = command
     {
         // A reporting failure must never block an agent turn or approve a tool.
         let _ = readiness::claude_hook(
@@ -389,114 +441,13 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
         );
         return Ok(());
     }
-    match &args.command {
+    match command {
         HostCommand::InstallCmux {
             config_file,
             enable,
             uninstall,
         } => {
             installer::run(&dir, config_file.as_deref(), *enable, *uninstall)?;
-            return Ok(());
-        }
-        HostCommand::Credential { command } => {
-            match command {
-                CredentialCommand::Add {
-                    kind,
-                    alg,
-                    public_key,
-                    label,
-                    grants,
-                } => {
-                    let (credential, host_id) =
-                        authz::enroll_from_cli(&dir, kind, alg, public_key, label, grants)?;
-                    println!("Approved credential {credential}\nHost audience (aud): {host_id}");
-                }
-                CredentialCommand::Revoke {
-                    credential_id,
-                    json,
-                } => revoke_credential(&dir, credential_id, *json)?,
-                CredentialCommand::Identity => println!("{}", authz::host_id(&dir)?),
-                CredentialCommand::Descriptor => println!("{}", authz::attest::descriptor(&dir)?),
-                CredentialCommand::AgentKey => {
-                    let (public, kid) = agent_link::agent_public(&dir)?;
-                    println!("Agent public key (standard base64): {public}\nKey id: {kid}");
-                }
-                CredentialCommand::PairPeer {
-                    host,
-                    session,
-                    label,
-                } => {
-                    let id = agent_link::pair_peer(&dir, host, session, label)?;
-                    println!("Paired session {session} on host {id}");
-                }
-                CredentialCommand::UnpairPeer { session } => {
-                    authz::ensure_dir(&dir)?;
-                    let removed = authz::store::Store::open(&dir)?.target_remove(session)?;
-                    println!("{}", if removed { "Unpaired" } else { "Not paired" });
-                }
-                CredentialCommand::Peers => {
-                    authz::ensure_dir(&dir)?;
-                    for (session, host, label) in authz::store::Store::open(&dir)?.targets()? {
-                        println!("{session}  host {host}  {label}");
-                    }
-                }
-            }
-            return Ok(());
-        }
-        HostCommand::History { command } => {
-            match command {
-                HistoryCommand::Import { session, json } => {
-                    import::run(&dir, &global.server, session.as_deref(), *json)?
-                }
-                HistoryCommand::Get {
-                    session,
-                    limit,
-                    json,
-                } => history::run_get(&dir, session, *limit, *json)?,
-                HistoryCommand::Search {
-                    query,
-                    session,
-                    limit,
-                } => history::run_search(&dir, query, session.as_deref(), *limit)?,
-                HistoryCommand::Share {
-                    session,
-                    organization,
-                    email,
-                } => {
-                    let audience = if *organization {
-                        publication::Audience::Organization {}
-                    } else {
-                        publication::Audience::Restricted {
-                            emails: email.clone(),
-                            write_pending: Vec::new(),
-                        }
-                    };
-                    let settings = settings::Settings::load(&dir)?;
-                    let owner =
-                        publication::configured_owner(settings.publication.account.as_deref())?;
-                    let status = publication::share(
-                        &dir,
-                        session,
-                        audience,
-                        owner.as_deref(),
-                        &global.server,
-                    )?;
-                    println!("{}", publication::render(&status));
-                    println!("The running host publishes it; check with `host history status {session}`.");
-                }
-                HistoryCommand::Unshare { session } => {
-                    let status = publication::unshare(&dir, session)?;
-                    println!("{}", publication::render(&status));
-                }
-                HistoryCommand::Status { session, json } => {
-                    let status = publication::status(&dir, session)?;
-                    if *json {
-                        println!("{}", serde_json::to_string(&status)?);
-                    } else {
-                        println!("{}", publication::render(&status));
-                    }
-                }
-            }
             return Ok(());
         }
         HostCommand::Configure {
@@ -623,15 +574,12 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
             if host_control
                 && std::os::unix::net::UnixStream::connect(dir.join("host.sock")).is_err()
             {
-                let result = run(
+                let result = run_daemon(
                     global,
-                    &HostArgs {
-                        runtime_dir: Some(dir.clone()),
-                        command: HostCommand::Run {
-                            backend: Backend::Cmux,
-                            cmux_bin: None,
-                            cookie_file: None,
-                        },
+                    &dir,
+                    &HostStartup {
+                        backend: Some(Backend::Cmux),
+                        ..HostStartup::default()
                     },
                 );
                 // Another restored host may have won the runtime lock after our
@@ -731,14 +679,17 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
                     if let Err(error) = run(
                         global,
                         &HostArgs {
-                            runtime_dir: Some(dir),
-                            command: HostCommand::Wrap {
+                            runtime: RuntimeDirArgs {
+                                runtime_dir: Some(dir),
+                            },
+                            startup: HostStartup::default(),
+                            command: Some(HostCommand::Wrap {
                                 session_id: None,
                                 cwd: None,
                                 agent: AgentKind::Zsh,
                                 headless: false,
                                 command: command.clone(),
-                            },
+                            }),
                         },
                     ) {
                         eprintln!(
@@ -757,140 +708,13 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
         }
         _ => {}
     }
-    if let HostCommand::Run { .. } = args.command {
-        validate_server(&global.server)?;
-    }
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    let result = runtime.block_on(async {
-        match &args.command {
+    block_on(async {
+        match command {
             HostCommand::InstallCmux { .. }
-            | HostCommand::Credential { .. }
-            | HostCommand::History { .. }
             | HostCommand::Configure { .. }
             | HostCommand::Shell { .. }
             | HostCommand::OpencodeBridge { .. }
             | HostCommand::AgentHook { .. } => unreachable!(),
-            HostCommand::Web { port, reset_browser_access } => {
-                // A running host serves the UI itself: ask it for a fresh
-                // one-time owner link instead of starting a second, unmanaged
-                // process beside it. No answer (no host, or an older one) or a
-                // host without the UI (disabled, or its port was taken) keeps
-                // the standalone foreground behavior.
-                let command = if *reset_browser_access { ClientMessage::WebBootstrapReset } else { ClientMessage::WebBootstrap };
-                match request(&dir, command).await {
-                    Ok(ServerMessage::WebBootstrap { url: Some(bootstrap) }) => {
-                        let public = bootstrap.split('#').next().unwrap_or(&bootstrap);
-                        println!("Local host management: {public}");
-                        if *port != settings::DEFAULT_WEB_PORT
-                            && !public.contains(&format!(":{port}/"))
-                        {
-                            eprintln!(
-                                "Note: the running host serves on its configured port; --port {port} was ignored."
-                            );
-                        }
-                        web::open_local_management(&bootstrap)
-                    }
-                    Ok(ServerMessage::WebBootstrap { url: None }) => {
-                        web::run(&dir, &global.server, *port, *reset_browser_access).await
-                    }
-                    Ok(other) => bail!("unexpected host response: {other:?}"),
-                    Err(_) => web::run(&dir, &global.server, *port, *reset_browser_access).await,
-                }
-            }
-            HostCommand::Passkey { command } => {
-                let read = |path: &Path| -> Result<serde_json::Value> {
-                    serde_json::from_slice(&std::fs::read(path)?)
-                        .context("response file is not JSON")
-                };
-                let request = match command {
-                    PasskeyCommand::EnrollStart {
-                        label,
-                        kind,
-                        grants,
-                    } => authz::passkey::PasskeyRequest::EnrollStart {
-                        label: label.clone(),
-                        kind: kind.clone(),
-                        grants: grants.clone(),
-                    },
-                    PasskeyCommand::EnrollFinish {
-                        challenge,
-                        response_file,
-                    } => authz::passkey::PasskeyRequest::EnrollFinish {
-                        challenge: challenge.clone(),
-                        response: read(response_file)?,
-                        // The local CLI path never carries a cross-host vouch;
-                        // that is the browser ceremony's proof to present.
-                        vouch: None,
-                    },
-                    PasskeyCommand::Pending => authz::passkey::PasskeyRequest::Pending,
-                    PasskeyCommand::Approve { cred_id } => {
-                        authz::passkey::PasskeyRequest::Approve {
-                            cred_id: cred_id.clone(),
-                        }
-                    }
-                    PasskeyCommand::DelegateStart {
-                        browser_pub,
-                        dlg,
-                        caps,
-                    } => authz::passkey::PasskeyRequest::DelegateStart {
-                        browser_pub: browser_pub.clone(),
-                        dlg: dlg.clone(),
-                        caps: caps.clone(),
-                        nonce: uuid::Uuid::new_v4().simple().to_string(),
-                    },
-                    PasskeyCommand::DelegateFinish {
-                        challenge,
-                        response_file,
-                    } => authz::passkey::PasskeyRequest::DelegateFinish {
-                        challenge: challenge.clone(),
-                        response: read(response_file)?,
-                    },
-                };
-                match self::request(&dir, ClientMessage::Passkey { request }).await? {
-                    ServerMessage::Passkey {
-                        response: Some(response),
-                        ..
-                    } => {
-                        println!("{}", serde_json::to_string_pretty(&response)?);
-                        if let (
-                            PasskeyCommand::EnrollStart { .. },
-                            authz::passkey::PasskeyResponse::Started { challenge, options },
-                        ) = (command, &response)
-                        {
-                            println!(
-                                "\nOpen this link in the browser where you want the passkey. Everything after the\n# stays in that browser and is never sent to the server:\n\n  {}\n\nThen approve the registration here: `host passkey pending`, `host passkey approve <id>`.",
-                                authz::passkey::enrollment_link(
-                                    &global.server,
-                                    &authz::attest::descriptor(&dir)?,
-                                    challenge,
-                                    options,
-                                )?
-                            );
-                        }
-                        Ok(())
-                    }
-                    ServerMessage::Passkey {
-                        error: Some(error), ..
-                    } => bail!("{error}"),
-                    other => bail!("unexpected host reply: {other:?}"),
-                }
-            }
-            HostCommand::Run {
-                backend,
-                cmux_bin,
-                cookie_file,
-            } => {
-                daemon::run(
-                    global,
-                    &dir,
-                    *backend,
-                    cmux_bin.as_deref(),
-                    cookie_file.as_deref(),
-                )
-                .await
-            }
             HostCommand::Wrap {
                 session_id,
                 cwd,
@@ -983,11 +807,244 @@ pub fn run(global: &GlobalOpts, args: &HostArgs) -> Result<()> {
                 _ => bail!("unexpected host response"),
             },
         }
-    });
+    })
+}
+
+fn run_daemon(global: &GlobalOpts, dir: &Path, startup: &HostStartup) -> Result<()> {
+    validate_server(&global.server)?;
+    block_on(daemon::run(
+        global,
+        dir,
+        startup.backend.unwrap_or(Backend::Auto),
+        startup.cmux_bin.as_deref(),
+        startup.cookie_file.as_deref(),
+    ))
+}
+
+fn block_on(work: impl std::future::Future<Output = Result<()>>) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(work);
     // GitHub reads already in flight on blocking threads must not delay a
     // host-only restart or keep disconnected wrappers waiting indefinitely.
     runtime.shutdown_timeout(std::time::Duration::from_secs(2));
     result
+}
+
+/// `credential`: approval state lives in the runtime directory and works
+/// whether or not a host is running.
+pub fn credential(args: &CredentialArgs) -> Result<()> {
+    let dir = args.runtime.resolve()?;
+    match &args.command {
+        CredentialCommand::Add {
+            kind,
+            alg,
+            public_key,
+            label,
+            grants,
+        } => {
+            let (credential, host_id) =
+                authz::enroll_from_cli(&dir, kind, alg, public_key, label, grants)?;
+            println!("Approved credential {credential}\nHost audience (aud): {host_id}");
+        }
+        CredentialCommand::Revoke {
+            credential_id,
+            json,
+        } => revoke_credential(&dir, credential_id, *json)?,
+        CredentialCommand::Identity => println!("{}", authz::host_id(&dir)?),
+        CredentialCommand::Descriptor => println!("{}", authz::attest::descriptor(&dir)?),
+        CredentialCommand::AgentKey => {
+            let (public, kid) = agent_link::agent_public(&dir)?;
+            println!("Agent public key (standard base64): {public}\nKey id: {kid}");
+        }
+        CredentialCommand::PairPeer {
+            host,
+            session,
+            label,
+        } => {
+            let id = agent_link::pair_peer(&dir, host, session, label)?;
+            println!("Paired session {session} on host {id}");
+        }
+        CredentialCommand::UnpairPeer { session } => {
+            authz::ensure_dir(&dir)?;
+            let removed = authz::store::Store::open(&dir)?.target_remove(session)?;
+            println!("{}", if removed { "Unpaired" } else { "Not paired" });
+        }
+        CredentialCommand::Peers => {
+            authz::ensure_dir(&dir)?;
+            for (session, host, label) in authz::store::Store::open(&dir)?.targets()? {
+                println!("{session}  host {host}  {label}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `history`: local history reads and publication state in the runtime
+/// directory; `import` also contacts the server.
+pub fn history(global: &GlobalOpts, args: &HistoryArgs) -> Result<()> {
+    let dir = args.runtime.resolve()?;
+    match &args.command {
+        HistoryCommand::Import { session, json } => {
+            import::run(&dir, &global.server, session.as_deref(), *json)?
+        }
+        HistoryCommand::Get {
+            session,
+            limit,
+            json,
+        } => history::run_get(&dir, session, *limit, *json)?,
+        HistoryCommand::Search {
+            query,
+            session,
+            limit,
+        } => history::run_search(&dir, query, session.as_deref(), *limit)?,
+        HistoryCommand::Share {
+            session,
+            organization,
+            email,
+        } => {
+            let audience = if *organization {
+                publication::Audience::Organization {}
+            } else {
+                publication::Audience::Restricted {
+                    emails: email.clone(),
+                    write_pending: Vec::new(),
+                }
+            };
+            let settings = settings::Settings::load(&dir)?;
+            let owner = publication::configured_owner(settings.publication.account.as_deref())?;
+            let status =
+                publication::share(&dir, session, audience, owner.as_deref(), &global.server)?;
+            println!("{}", publication::render(&status));
+            println!("The running host publishes it; check with `history status {session}`.");
+        }
+        HistoryCommand::Unshare { session } => {
+            let status = publication::unshare(&dir, session)?;
+            println!("{}", publication::render(&status));
+        }
+        HistoryCommand::Status { session, json } => {
+            let status = publication::status(&dir, session)?;
+            if *json {
+                println!("{}", serde_json::to_string(&status)?);
+            } else {
+                println!("{}", publication::render(&status));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `passkey`: performed by the running host over its owner-only socket.
+pub fn passkey(global: &GlobalOpts, args: &PasskeyArgs) -> Result<()> {
+    let dir = args.runtime.resolve()?;
+    let command = &args.command;
+    block_on(async {
+        let read = |path: &Path| -> Result<serde_json::Value> {
+            serde_json::from_slice(&std::fs::read(path)?).context("response file is not JSON")
+        };
+        let request = match command {
+            PasskeyCommand::EnrollStart {
+                label,
+                kind,
+                grants,
+            } => authz::passkey::PasskeyRequest::EnrollStart {
+                label: label.clone(),
+                kind: kind.clone(),
+                grants: grants.clone(),
+            },
+            PasskeyCommand::EnrollFinish {
+                challenge,
+                response_file,
+            } => authz::passkey::PasskeyRequest::EnrollFinish {
+                challenge: challenge.clone(),
+                response: read(response_file)?,
+                // The local CLI path never carries a cross-host vouch;
+                // that is the browser ceremony's proof to present.
+                vouch: None,
+            },
+            PasskeyCommand::Pending => authz::passkey::PasskeyRequest::Pending,
+            PasskeyCommand::Approve { cred_id } => authz::passkey::PasskeyRequest::Approve {
+                cred_id: cred_id.clone(),
+            },
+            PasskeyCommand::DelegateStart {
+                browser_pub,
+                dlg,
+                caps,
+            } => authz::passkey::PasskeyRequest::DelegateStart {
+                browser_pub: browser_pub.clone(),
+                dlg: dlg.clone(),
+                caps: caps.clone(),
+                nonce: uuid::Uuid::new_v4().simple().to_string(),
+            },
+            PasskeyCommand::DelegateFinish {
+                challenge,
+                response_file,
+            } => authz::passkey::PasskeyRequest::DelegateFinish {
+                challenge: challenge.clone(),
+                response: read(response_file)?,
+            },
+        };
+        match self::request(&dir, ClientMessage::Passkey { request }).await? {
+            ServerMessage::Passkey {
+                response: Some(response),
+                ..
+            } => {
+                println!("{}", serde_json::to_string_pretty(&response)?);
+                if let (
+                    PasskeyCommand::EnrollStart { .. },
+                    authz::passkey::PasskeyResponse::Started { challenge, options },
+                ) = (command, &response)
+                {
+                    println!(
+                            "\nOpen this link in the browser where you want the passkey. Everything after the\n# stays in that browser and is never sent to the server:\n\n  {}\n\nThen approve the registration here: `passkey pending`, `passkey approve <id>`.",
+                            authz::passkey::enrollment_link(
+                                &global.server,
+                                &authz::attest::descriptor(&dir)?,
+                                challenge,
+                                options,
+                            )?
+                        );
+                }
+                Ok(())
+            }
+            ServerMessage::Passkey {
+                error: Some(error), ..
+            } => bail!("{error}"),
+            other => bail!("unexpected host reply: {other:?}"),
+        }
+    })
+}
+
+/// `open`: ask the running host for a fresh one-time owner link to the UI it
+/// serves and hand it to the browser. Never serves the UI itself.
+pub fn open(args: &OpenArgs) -> Result<()> {
+    let dir = args.runtime.resolve()?;
+    let command = if args.reset_browser_access {
+        ClientMessage::WebBootstrapReset
+    } else {
+        ClientMessage::WebBootstrap
+    };
+    block_on(async {
+        match request(&dir, command).await? {
+            ServerMessage::WebBootstrap {
+                url: Some(bootstrap),
+            } => {
+                // The token stays in the fragment, which only the browser sees.
+                let public = bootstrap.split('#').next().unwrap_or(&bootstrap);
+                println!("Local host management: {public}");
+                web::open_local_management(&bootstrap)
+            }
+            ServerMessage::WebBootstrap { url: None } => bail!(
+                "the running host is not serving its local web UI: it is turned off, or its port \
+                 was unavailable when the host started (see the host's output). Turn it on with \
+                 `arrakis-conversations host configure --web true` (and `--web-port <PORT>` for a \
+                 free port), then restart `arrakis-conversations host`."
+            ),
+            ServerMessage::Error { message } => bail!("{message}"),
+            _ => bail!("unexpected host response"),
+        }
+    })
 }
 
 fn bootstrap_host(dir: &std::path::Path, server: &str) -> Result<()> {
@@ -1050,7 +1107,7 @@ pub(super) fn default_command(agent: AgentKind, command: &[String]) -> Vec<Strin
     }
 }
 
-/// `host credential revoke`: commit the revocation locally first (it holds
+/// `credential revoke`: commit the revocation locally first (it holds
 /// whether or not a host is running), then ask a running host to interrupt the
 /// affected interactions and report exactly what it did.
 fn revoke_credential(dir: &Path, credential_id: &str, json: bool) -> Result<()> {
@@ -1132,7 +1189,12 @@ pub(crate) async fn host_sock_present(dir: &Path) -> bool {
 pub(crate) async fn request(dir: &Path, message: ClientMessage) -> Result<ServerMessage> {
     let mut socket = tokio::net::UnixStream::connect(dir.join("host.sock"))
         .await
-        .context("connecting to local host; run `host run` first")?;
+        .with_context(|| {
+            format!(
+                "no local host is answering in {}; start it with `arrakis-conversations host`",
+                dir.display()
+            )
+        })?;
     write_message(&mut socket, &message).await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(15),

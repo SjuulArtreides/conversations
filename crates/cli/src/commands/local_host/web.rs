@@ -64,10 +64,9 @@ pub(super) struct WebState {
     pub(super) dir: PathBuf,
     pub(super) server: String,
     /// The one-time bootstrap token awaiting exchange. The local owner rotates
-    /// it over the host socket (`host web`); a successful unlock consumes it.
+    /// it over the host socket (`open`); a successful unlock consumes it.
     pending_token: Mutex<Option<(String, String)>>,
     revoked: tokio::sync::watch::Sender<u64>,
-    needs_setup: bool,
     pub(super) port: u16,
 }
 
@@ -100,17 +99,11 @@ impl WebState {
             "INSERT OR IGNORE INTO browser_owner(id, cookie, setup_complete) VALUES(1, ?1, 0)",
             [random_token()?],
         )?;
-        let setup_complete: bool = db.query_row(
-            "SELECT setup_complete FROM browser_owner WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
         Ok(Arc::new(Self {
             dir: dir.to_owned(),
             server: server.trim_end_matches('/').to_owned(),
             pending_token: Mutex::new(None),
             revoked: tokio::sync::watch::channel(0).0,
-            needs_setup: !setup_complete,
             port,
         }))
     }
@@ -129,19 +122,6 @@ impl WebState {
         )?;
         *pending = Some((token, cookie));
         Ok(url)
-    }
-
-    fn initial_setup_url(&self) -> Result<Option<String>> {
-        self.needs_setup
-            .then(|| self.rotate_bootstrap_url())
-            .transpose()
-    }
-
-    pub(super) fn open_initial_setup(&self) -> Result<()> {
-        if let Some(url) = self.initial_setup_url()? {
-            open_local_management(&url)?;
-        }
-        Ok(())
     }
 
     // Serialize exchange and revocation. A failed write leaves the token usable.
@@ -196,8 +176,8 @@ impl WebState {
     }
 }
 
-/// The loopback management server: bound once, then served until the caller's
-/// shutdown signal (standalone) or task abort (the host that owns it).
+/// The loopback management server: bound once, then served until the host
+/// that owns it stops.
 pub(super) struct WebServer {
     listener: tokio::net::TcpListener,
     state: Arc<WebState>,
@@ -239,23 +219,6 @@ impl WebServer {
     }
 }
 
-pub async fn run(dir: &Path, server: &str, port: u16, reset_browser_access: bool) -> Result<()> {
-    super::validate_server(server)?;
-    let server = WebServer::bind(dir, server, port).await?;
-    let url = format!("http://localhost:{}/", server.port());
-    println!("Local host management: {url}");
-    if reset_browser_access {
-        server.state().reset_browser_access()?;
-    }
-    let bootstrap = server.state().rotate_bootstrap_url()?;
-    open_local_management(&bootstrap)?;
-    server
-        .serve(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-}
-
 /// Open the owner link in the local browser. The credential stays in the URL
 /// fragment, out of logs, HTTP URLs and the hosted application.
 pub(super) fn open_local_management(bootstrap_url: &str) -> Result<()> {
@@ -269,7 +232,7 @@ pub(super) fn open_local_management(bootstrap_url: &str) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .context("opening local management; set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `arrakis-conversations host web`")?;
+        .context("opening local management; set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `arrakis-conversations open`")?;
     Ok(())
 }
 
@@ -481,7 +444,7 @@ async fn guard(State(state): State<Arc<WebState>>, request: Request, next: Next)
         if !authorized {
             return error(
                 StatusCode::UNAUTHORIZED,
-                "Open this page using host web on your laptop.",
+                "Open this page using `arrakis-conversations open` on your laptop.",
             );
         }
     }
@@ -856,22 +819,14 @@ mod tests {
     }
     #[tokio::test]
     async fn browser_authorization_survives_host_restart() {
-        let mut f = fixture().await;
-        let setup = f
-            .state
-            .initial_setup_url()
-            .unwrap()
-            .expect("first start opens setup");
-        f.token = setup.rsplit("#token=").next().unwrap().to_owned();
+        let f = fixture().await;
         let c = cookie(&f).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let restarted = WebState::new(f._dir.path(), "https://example.com", port).unwrap();
-        assert!(restarted.initial_setup_url().unwrap().is_none());
         let other = tempfile::tempdir().unwrap();
         std::fs::set_permissions(other.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let unrelated = WebState::new(other.path(), "https://example.com", port).unwrap();
-        assert!(unrelated.needs_setup);
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::COOKIE, HeaderValue::from_str(&c).unwrap());
         assert!(!has_owner_cookie(&unrelated, &headers));
@@ -1092,7 +1047,7 @@ mod tests {
         let first = cookie(&f).await;
         // Already used.
         assert_eq!(unlock(&f.token).send().await.unwrap().status(), 401);
-        // The local owner rotates the link over the host socket (`host web`)
+        // The local owner rotates the link over the host socket (`open`)
         // and the fresh token works while the old cookie stays valid.
         let bootstrap = f.state.rotate_bootstrap_url().unwrap();
         let token = bootstrap.rsplit("#token=").next().unwrap().to_owned();

@@ -27,7 +27,7 @@ interface Ceremony {
 }
 
 /**
- * Parse the fragment written by `host passkey enroll-start`. The link carries
+ * Parse the fragment written by `passkey enroll-start`. The link carries
  * the host's public key; the id shown and pinned is derived from it. Nothing
  * leaves the page.
  */
@@ -49,7 +49,7 @@ export async function parseHostLink(hash: string): Promise<Ceremony | null> {
 }
 
 /**
- * Landing page for the link printed by `host passkey enroll-start`. The host
+ * Landing page for the link printed by `passkey enroll-start`. The host
  * started this registration locally; this page only runs the passkey prompt and
  * hands the result back. The registration is NOT trusted until it is approved
  * on the host itself.

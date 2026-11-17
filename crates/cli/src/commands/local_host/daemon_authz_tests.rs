@@ -1363,7 +1363,7 @@ mod signed {
 mod owner_cookie {
     //! Owner-cookie direct-localhost rename goes through the same effective
     //! title and shared-workspace invariants as the signed hosted path. The
-    //! web process (`host web`) holds no cmux of its own; its rename message
+    //! web server holds no cmux of its own; its rename message
     //! is a typed `OwnerRename` on the daemon's owner-only Unix socket. Both
     //! paths meet at `commit_owner_rename`.
     use super::*;
@@ -1670,7 +1670,7 @@ mod passkey {
     }
 
     /// The real adapter: a request over the host's Unix socket, handled by
-    /// `handle_client` exactly as `host passkey ...` would be.
+    /// `handle_client` exactly as `passkey ...` would be.
     async fn call(fixture: &Fixture, request: PasskeyRequest) -> Result<PasskeyResponse, String> {
         let host = Arc::new(fixture.host(fixture.server()));
         let (mut client, server) = tokio::net::UnixStream::pair().unwrap();

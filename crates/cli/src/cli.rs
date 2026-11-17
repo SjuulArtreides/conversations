@@ -68,9 +68,23 @@ pub enum Command {
     /// mirrors it to the web. Use `--resume <id>` to continue an existing
     /// session, or `--host` to resume checkpointed local sessions.
     Live(LiveArgs),
-    /// Experimental localhost daemon and terminal wrappers (Unix only).
+    /// Run the local host in the foreground, with its loopback management UI;
+    /// subcommands inspect and configure it and never start one (Unix only).
     #[cfg(unix)]
     Host(crate::commands::local_host::HostArgs),
+    /// Open the running host's management UI with a fresh one-time owner link.
+    #[cfg(unix)]
+    Open(crate::commands::local_host::OpenArgs),
+    /// Locally approved credentials that may sign remote operations for this host.
+    #[cfg(unix)]
+    Credential(crate::commands::local_host::CredentialArgs),
+    /// Passkey enrollment and browser delegation, performed by the running host
+    /// over its owner-only socket.
+    #[cfg(unix)]
+    Passkey(crate::commands::local_host::PasskeyArgs),
+    /// Read local transcript history or import owned server histories.
+    #[cfg(unix)]
+    History(crate::commands::local_host::HistoryArgs),
     /// Authenticate with the server (email + password) and save the session.
     Login(LoginArgs),
     /// Forget the saved session for the server.
@@ -153,7 +167,7 @@ pub struct LiveArgs {
     /// Stay resident without starting a new local session of your own: offer to
     /// resume the checkpointed sessions, and start more locally with Ctrl-a c.
     /// Web start, re-open, input and end need the signed local host
-    /// (`arrakis-conversations host run`).
+    /// (`arrakis-conversations host`).
     #[arg(long)]
     pub host: bool,
 
@@ -279,6 +293,49 @@ mod tests {
             "abc"
         ])
         .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bare_host_runs_and_management_groups_select_the_runtime_at_top_level() {
+        let Command::Host(host) =
+            parse(&["host", "--backend", "normal", "--cookie-file", "c"]).command
+        else {
+            panic!("not host")
+        };
+        assert!(host.command.is_none() && host.startup_conflict().is_none());
+        let Command::Host(host) = parse(&["host", "--runtime-dir", "/r", "status"]).command else {
+            panic!("not host")
+        };
+        assert!(host.command.is_some() && host.startup_conflict().is_none());
+        assert_eq!(host.runtime.runtime_dir.as_deref(), Some("/r".as_ref()));
+        let Command::Host(host) = parse(&["host", "--backend", "normal", "status"]).command else {
+            panic!("not host")
+        };
+        assert_eq!(host.startup_conflict(), Some("--backend"));
+        for args in [
+            &["credential", "--runtime-dir", "/r", "identity"][..],
+            &["credential", "identity", "--runtime-dir", "/r"],
+            &["passkey", "--runtime-dir", "/r", "pending"],
+            &["history", "search", "words", "--runtime-dir", "/r"],
+            &["open", "--runtime-dir", "/r", "--reset-browser-access"],
+        ] {
+            let runtime = match parse(args).command {
+                Command::Credential(group) => group.runtime,
+                Command::Passkey(group) => group.runtime,
+                Command::History(group) => group.runtime,
+                Command::Open(open) => {
+                    assert!(open.reset_browser_access);
+                    open.runtime
+                }
+                other => panic!("{args:?}: {other:?}"),
+            };
+            assert_eq!(
+                runtime.runtime_dir.as_deref(),
+                Some("/r".as_ref()),
+                "{args:?}"
+            );
+        }
     }
 
     #[test]

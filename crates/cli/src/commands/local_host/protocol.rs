@@ -405,7 +405,7 @@ pub enum ClientMessage {
         outcome: CancelOutcome,
     },
     /// Sent on the owner-only host socket after a local authority change was
-    /// committed (`host credential revoke`). It carries no authority: the host
+    /// committed (`credential revoke`). It carries no authority: the host
     /// re-reads its own database and interrupts interactions whose authority no
     /// longer holds.
     AuthorityChanged,

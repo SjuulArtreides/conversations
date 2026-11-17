@@ -46,7 +46,7 @@ impl LocalHost {
             Err(error) => {
                 live_error!(
                     "conversations live: no local host for these sessions ({error:#}); \
-                     they stay local and register when `host run` starts"
+                     they stay local and register when `host` starts"
                 );
                 Self { dir, owned: None }
             }
@@ -68,7 +68,7 @@ fn start(server: &str, dir: &Path) -> Result<Child> {
     let mut child = Command::new(std::env::current_exe()?)
         .args(["--server", server, "host", "--runtime-dir"])
         .arg(dir)
-        .args(["run", "--backend", "normal"])
+        .args(["--backend", "normal"])
         .env_remove("CONVERSATIONS_WRAPPED")
         .env_remove("CONVERSATIONS_WRAPPER_PID")
         .env_remove("CONVERSATIONS_HOST_CONTROL")

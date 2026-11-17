@@ -168,7 +168,7 @@ pub(super) struct Host {
     launch_env: LaunchEnv,
     /// The loopback management UI this host serves, when it owns its
     /// configured port. The owner rotates its one-time link over the local
-    /// socket (`host web`).
+    /// socket (`open`).
     web: Option<Arc<super::web::WebState>>,
 }
 
@@ -350,7 +350,7 @@ impl StreamState {
     }
 }
 
-/// Select a concrete backend for `host run`. `Auto` promotes to cmux only when
+/// Select a concrete backend for bare `host`. `Auto` promotes to cmux only when
 /// `workspace_id` is present, cmux is reachable, and that workspace still
 /// exists in the current tree. An inherited-but-stale `CMUX_WORKSPACE_ID`
 /// resolves to Normal rather than attaching this daemon to the wrong workspace.
@@ -537,12 +537,6 @@ pub async fn run(
     // The management UI lives and dies with the host; a running host never
     // needs a second, unmanaged process for it.
     if let Some(server) = web_server {
-        let setup = server.state();
-        jobs.spawn_blocking(move || {
-            if let Err(error) = setup.open_initial_setup() {
-                eprintln!("Local browser setup did not open: {error:#}. Set CONVERSATIONS_BROWSER to an installed browser launcher executable, then run `arrakis-conversations host web` on this machine.");
-            }
-        });
         jobs.spawn(async move {
             if let Err(error) = server.serve(std::future::pending()).await {
                 eprintln!("Local web UI stopped: {error:#}");

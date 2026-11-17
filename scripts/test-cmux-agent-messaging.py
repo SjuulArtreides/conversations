@@ -158,11 +158,11 @@ def main():
         workspaces.append(context["workspace_id"])
         environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"], CMUX_WINDOW_ID=args.cmux_window)
         host = spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
-            "run", "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
+            "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "host socket")
         host_id = subprocess.check_output(
-            [str(target / "arrakis-conversations"), "host", "--runtime-dir", str(runtime),
-             "credential", "identity"],
+            [str(target / "arrakis-conversations"), "credential", "--runtime-dir", str(runtime),
+             "identity"],
             cwd=ROOT, env=environment, timeout=3, text=True,
         ).strip()
         wait(lambda: http(f"/api/host-relay/{host_id}/status")["online"], "host relay connection")

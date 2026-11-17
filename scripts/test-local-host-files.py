@@ -77,7 +77,7 @@ class HostAuthority:
         self.key = Ed25519PrivateKey.generate()
         public = self.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.kid = b64url(hashlib.sha256(public).digest())
-        command = [str(test.cli), "host", "--runtime-dir", str(test.host_dir), "credential"]
+        command = [str(test.cli), "credential", "--runtime-dir", str(test.host_dir)]
         descriptor = subprocess.check_output(command + ["descriptor"],
             cwd=module.ROOT, env=test.environment, timeout=5, text=True).strip()
         assert descriptor.startswith("chd1."), descriptor
@@ -153,7 +153,7 @@ async def run(target, backend):
             cookie.write_text(test.cookie)
             cookie.chmod(0o600)
             host_args = [str(test.cli), "--server", test.url, "host", "--runtime-dir",
-                str(test.host_dir), "run", "--cookie-file", str(cookie), "--backend", backend]
+                str(test.host_dir), "--cookie-file", str(cookie), "--backend", backend]
             if backend == "cmux":
                 # Controlled cmux RPC fixture only. Never connect to the user's cmux socket.
                 cmux = folder / "cmux"

@@ -209,7 +209,7 @@ export function HostSetup({ active = true }: { active?: boolean }) {
       : null);
   const approvalCommand = publication.key.data
     ? [
-        "arrakis-conversations host credential add --kind owner --alg es256",
+        "arrakis-conversations credential add --kind owner --alg es256",
         `--public-key ${toBase64(publication.key.data.publicRaw)}`,
         `--label '${browserName.replaceAll("'", "'\"'\"'")}'`,
         ...[
@@ -322,9 +322,9 @@ export function HostSetup({ active = true }: { active?: boolean }) {
         <form onSubmit={(event) => void connect(event)} className="space-y-3">
           <p className="text-sm text-muted-foreground">
             On the machine where your agents run, start{" "}
-            <code>arrakis-conversations host run</code>. Copy its public
+            <code>arrakis-conversations host</code>. Copy its public
             descriptor with{" "}
-            <code>arrakis-conversations host credential descriptor</code>.
+            <code>arrakis-conversations credential descriptor</code>.
           </p>
           <label className="block text-sm">
             Host descriptor
@@ -361,7 +361,7 @@ export function HostSetup({ active = true }: { active?: boolean }) {
       )}
       {offline && (
         <p role="status" className="text-sm">
-          Start <code>arrakis-conversations host run</code> on{" "}
+          Start <code>arrakis-conversations host</code> on{" "}
           <strong>{host!.label}</strong>. This page checks automatically while
           open.
         </p>

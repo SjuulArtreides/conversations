@@ -210,7 +210,7 @@ fn reads(central: &Shared) -> usize {
         .count()
 }
 
-/// The host directory `pr sync` and `host run` use.
+/// The host directory `pr sync` and `host` use.
 fn host_dir() -> PathBuf {
     let dir = dirs::home_dir().unwrap().join(".conversations-host-local");
     std::fs::create_dir_all(&dir).unwrap();

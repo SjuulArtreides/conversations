@@ -171,7 +171,7 @@ finally:
             .command()
             .args(["--server", &self.central, "host", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["run", "--backend", "normal"])
+            .args(["--backend", "normal"])
             .env("CONVERSATIONS_TEST_DELIVERY_BARRIER", &self.barrier)
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -206,9 +206,9 @@ finally:
     fn id(&self) -> String {
         let output = self
             .command()
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
-            .args(["credential", "identity"])
+            .arg("identity")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -239,10 +239,9 @@ finally:
     fn enroll(&self, alg: &str, public_key: &str, grants: &[String]) -> String {
         let mut command = self.command();
         command
-            .args(["host", "--runtime-dir"])
+            .args(["credential", "--runtime-dir"])
             .arg(&self.runtime)
             .args([
-                "credential",
                 "add",
                 "--kind",
                 "owner",

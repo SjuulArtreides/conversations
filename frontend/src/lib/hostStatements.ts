@@ -53,7 +53,7 @@ export async function parseDescriptor(text: string): Promise<PinnedHost> {
   const trimmed = text.trim();
   if (!trimmed.startsWith(DESCRIPTOR_PREFIX)) {
     throw new StatementError(
-      "That is not a host descriptor. Run `arrakis-conversations host credential descriptor` on the host.",
+      "That is not a host descriptor. Run `arrakis-conversations credential descriptor` on the host.",
     );
   }
   const key = trimmed.slice(DESCRIPTOR_PREFIX.length);

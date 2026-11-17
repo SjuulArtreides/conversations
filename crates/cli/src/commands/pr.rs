@@ -7,7 +7,7 @@
 //! only by signed `pr.sync` / `pr.comment` operations). A list supplied by the
 //! server is never consulted, so the server cannot make this machine read a
 //! pull request: the old server-driven sync stream and watch-targets poll were
-//! removed. Polling now runs inside `host run`.
+//! removed. Polling now runs inside `host`.
 
 use anyhow::{Context, Result};
 

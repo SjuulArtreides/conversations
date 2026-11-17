@@ -39,7 +39,7 @@ fn different_runtime_directories_cannot_start_competing_hosts() {
                 .env("XDG_CONFIG_HOME", home.path().join("config"))
                 .args(["--server", "http://127.0.0.1:9", "host", "--runtime-dir"])
                 .arg(home.path().join(runtime))
-                .args(["run", "--backend", "normal"])
+                .args(["--backend", "normal"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
                 .spawn()

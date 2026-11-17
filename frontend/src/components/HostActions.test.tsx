@@ -117,7 +117,7 @@ describe("ReopenSessionButton gating", () => {
     // Tooltip lives on the wrapping span (a disabled button has no pointer events).
     expect(
       screen.getByTitle(
-        /your paired host is offline — run `arrakis-conversations host run` on it/i,
+        /your paired host is offline — run `arrakis-conversations host` on it/i,
       ),
     ).toBeInTheDocument();
   });
@@ -127,7 +127,7 @@ describe("ReopenSessionButton gating", () => {
     renderWithProviders(<ReopenSessionButton sessionId="sess-1" />);
 
     const marker = screen.getByLabelText(
-      /your paired host is offline — run `arrakis-conversations host run` on it/i,
+      /your paired host is offline — run `arrakis-conversations host` on it/i,
     );
     expect(marker).toHaveTextContent("?");
     expect(marker).toHaveClass("cursor-help");

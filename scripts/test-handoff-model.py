@@ -180,7 +180,7 @@ exec direnv exec {home}/example adk "$@"
             environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"],
                 CMUX_WINDOW_ID=args.cmux_window, CMUX_BUNDLED_CLI_PATH=str(CMUX))
         spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
-            "run", "--backend", args.backend, "--cookie-file", str(cookie_file)], "host", host_cwd)
+            "--backend", args.backend, "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "local host socket")
         source = str(uuid.uuid4())
         registrations.append(register_source(runtime, host_cwd, source))

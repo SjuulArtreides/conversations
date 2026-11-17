@@ -34,8 +34,12 @@ In another development shell, authenticate the CLI:
 ```sh
 cargo build --locked -p conversations-cli
 target/debug/arrakis-conversations --server http://localhost:8080 login
-target/debug/arrakis-conversations host run
+target/debug/arrakis-conversations host
 ```
+
+The host runs in the foreground and serves its local management UI on
+loopback. Open it from another shell with
+`target/debug/arrakis-conversations open`.
 
 The executable retains its existing name, `arrakis-conversations`. Local
 Claude Code, Codex, OpenCode, and cmux installations are separate prerequisites

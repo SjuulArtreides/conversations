@@ -101,7 +101,7 @@ async def main():
         cookie.write_text(t.cookie)
         cookie.chmod(0o600)
         t.spawn([str(t.cli), "--server", t.url, "host", "--runtime-dir", str(t.host_dir),
-            "run", "--backend", "cmux", "--cookie-file", str(cookie)], "host")
+            "--backend", "cmux", "--cookie-file", str(cookie)], "host")
         await t.wait(lambda: (t.host_dir / "host.sock").exists(), "host ready", timeout=30)
         proxy_server = await asyncio.start_unix_server(proxy, path=proxy_dir / "host.sock")
         live_id, live_child, _ = await wrap(neighbor)

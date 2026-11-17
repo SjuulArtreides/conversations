@@ -254,7 +254,7 @@ async def main():
         return json.loads(checkpoints.read_text())["servers"].get(t.url, []) if checkpoints.exists() else []
 
     host_argv = [str(t.cli), "--server", t.url, "host", "--runtime-dir", str(t.host_dir),
-                 "run", "--backend", "cmux", "--cookie-file", str(folder / "cookie")]
+                 "--backend", "cmux", "--cookie-file", str(folder / "cookie")]
     try:
         t.spawn([str(t.server)], "server")
         await t.wait(lambda: t.http("/healthz"), "server ready")

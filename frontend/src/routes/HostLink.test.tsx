@@ -106,7 +106,7 @@ describe("HostLink", () => {
     const done = await screen.findByTestId("host-link-done");
     expect(done).toHaveTextContent(/not trusted yet/i);
     expect(done).toHaveTextContent(/approve.*laptop/i);
-    expect(done).not.toHaveTextContent("host passkey approve");
+    expect(done).not.toHaveTextContent("passkey approve");
     expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
     expect(screen.getByLabelText("Device verification code")).toHaveTextContent(
       "cred-id-123".slice(-12),

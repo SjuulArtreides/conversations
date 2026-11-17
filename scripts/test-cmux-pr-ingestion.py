@@ -95,7 +95,7 @@ async def main():
         return json.loads(result.stdout)
     def start_host():
         return t.spawn([str(t.cli), "--server", t.url, "host", "--runtime-dir",
-            str(t.host_dir), "run", "--backend", args.backend,
+            str(t.host_dir), "--backend", args.backend,
             "--cookie-file", str(cookie)], "host")
     try:
         t.spawn([str(t.server)], "server")

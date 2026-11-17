@@ -107,7 +107,7 @@ def main():
         workspaces.append(context["workspace_id"])
         environment.update(CMUX_WORKSPACE_ID=context["workspace_id"], CMUX_SURFACE_ID=context["surface_id"], CMUX_WINDOW_ID=args.cmux_window)
         spawn([str(target / "arrakis-conversations"), "--server", origin, "host", "--runtime-dir", str(runtime),
-            "run", "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
+            "--backend", "cmux", "--cookie-file", str(cookie_file)], "host", host_cwd)
         wait(lambda: (runtime / "host.sock").exists(), "host socket")
         source, context_session = str(uuid.uuid4()), str(uuid.uuid4())
         for identity in [source, context_session]:
