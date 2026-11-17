@@ -47,8 +47,8 @@ function VersionBadge() {
   return (
     <span
       className="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
-      title={`Arrakis Conversations ${data.version}`}
-      aria-label={`Arrakis Conversations version ${data.version}`}
+      title={`Conversations ${data.version}`}
+      aria-label={`Conversations version ${data.version}`}
     >
       v{data.version}
     </span>
@@ -200,7 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-primary">
               💬
             </span>
-            <span>Arrakis Conversations</span>
+            <span>Conversations</span>
           </Link>
           <VersionBadge />
           <nav className="hidden items-center gap-4 text-sm md:flex">

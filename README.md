@@ -5,6 +5,9 @@ Browse and search transcripts, share sessions, and connect a local host for
 live terminals and agent-to-agent messaging. The application includes a Rust
 server and CLI, and a React frontend. SQLite and Postgres are supported.
 
+Conversations is developed as a personal side project. It is not sponsored or
+maintained by Arrakis as a company project.
+
 ## Run from source
 
 Install [Nix](https://nixos.org/download/) and enter the development shell:
@@ -29,17 +32,27 @@ and secure cookies for shared deployments. Password registration does not
 verify email ownership; use Google SSO for a shared deployment where identity
 verification matters.
 
-In another development shell, authenticate the CLI:
+In another development shell, point every CLI command at that server,
+authenticate, and start the host:
 
 ```sh
+export CONVERSATIONS_SERVER=http://localhost:8080
 cargo build --locked -p conversations-cli
-target/debug/arrakis-conversations --server http://localhost:8080 login
+target/debug/arrakis-conversations login
 target/debug/arrakis-conversations host
 ```
 
+`CONVERSATIONS_SERVER` sets the same server as the global `--server` option.
+Without either, commands use the default saved by `login`, then
+`http://localhost:8080`. `login` only offers to save a default when it can
+prompt in a terminal.
+
 The host runs in the foreground and serves its local management UI on
-loopback. Open it from another shell with
-`target/debug/arrakis-conversations open`.
+loopback. Open it from another shell that has the same
+`CONVERSATIONS_SERVER` with `target/debug/arrakis-conversations open`. To
+connect your browser and give
+someone else access to your host, follow the
+[trust onboarding walkthrough](docs/trust-onboarding.md).
 
 The executable retains its existing name, `arrakis-conversations`. Local
 Claude Code, Codex, OpenCode, and cmux installations are separate prerequisites

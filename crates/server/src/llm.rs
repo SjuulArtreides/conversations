@@ -95,7 +95,7 @@ impl LlmClient {
                 "HTTP-Referer",
                 "https://github.com/SjuulArtreides/conversations",
             )
-            .header("X-Title", "Arrakis Conversations")
+            .header("X-Title", "Conversations")
             .json(&body)
             .send()
             .await
@@ -155,7 +155,7 @@ impl LlmClient {
                 "HTTP-Referer",
                 "https://github.com/SjuulArtreides/conversations",
             )
-            .header("X-Title", "Arrakis Conversations")
+            .header("X-Title", "Conversations")
             .json(&body)
             .send()
             .await

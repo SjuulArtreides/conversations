@@ -68,7 +68,7 @@ describe("shared application local owner gate", () => {
     expect(
       await screen.findByText("Connect this browser once"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Arrakis Conversations")).toBeInTheDocument();
+    expect(screen.getByText("Conversations")).toBeInTheDocument();
     expect(screen.getByText("Owner session expired")).toBeInTheDocument();
     expect(screen.queryByText("Settings data loaded")).not.toBeInTheDocument();
     expect(api.authConfig).not.toHaveBeenCalled();
