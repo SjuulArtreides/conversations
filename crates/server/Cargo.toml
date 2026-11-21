@@ -41,6 +41,7 @@ base64 = { workspace = true }
 ring = "0.17"
 vt100 = "0.16"
 http-body-util = "0.1"
+lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "ring", "webpki-roots"] }
 
 [dev-dependencies]
 tower = { workspace = true }

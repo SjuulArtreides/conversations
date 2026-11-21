@@ -814,6 +814,126 @@ async fn search_matches_pr_url() {
 }
 
 #[tokio::test]
+async fn smtp_signup_requires_email_proof_and_consumes_it_once() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use conversations_server::config::SignupEmailConfig;
+
+    let (mut state, _db) = test_state_password_auth().await;
+    Arc::make_mut(&mut state.config).signup_email = SignupEmailConfig {
+        smtp_url: Some("smtps://sender:password@localhost".into()),
+        from: Some("sender@example.com".into()),
+        public_url: Some("https://example.com".into()),
+    };
+    let app = build_router_with_auth(state.clone()).await.unwrap();
+    let config = body_json(app.clone().oneshot(get("/api/auth/config")).await.unwrap()).await;
+    assert_eq!(config["signup_verification_enabled"], true);
+
+    let post = |path, body: Value| {
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let email = "signup@example.com";
+    let password = "signup-pass";
+    let credentials = json!({ "email": email, "password": password });
+    let bypass = app
+        .clone()
+        .oneshot(post("/auth/register", credentials.clone()))
+        .await
+        .unwrap();
+    assert_eq!(bypass.status(), StatusCode::NOT_FOUND);
+    let login = app
+        .clone()
+        .oneshot(post("/auth/login", credentials.clone()))
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::UNAUTHORIZED);
+
+    // Seed the digest of the token that would have been emailed by the relay.
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let digest = URL_SAFE_NO_PAD.encode(ring::digest::digest(
+        &ring::digest::SHA256,
+        token.as_bytes(),
+    ));
+    let now = chrono::Utc::now();
+    assert!(state
+        .repo
+        .reserve_signup_token(email, &digest, now, now + chrono::Duration::minutes(30))
+        .await
+        .unwrap());
+    assert!(!state
+        .repo
+        .reserve_signup_token(
+            email,
+            "replacement",
+            now,
+            now + chrono::Duration::minutes(30)
+        )
+        .await
+        .unwrap());
+    let expired = uuid::Uuid::new_v4().simple().to_string();
+    let expired_digest = URL_SAFE_NO_PAD.encode(ring::digest::digest(
+        &ring::digest::SHA256,
+        expired.as_bytes(),
+    ));
+    assert!(state
+        .repo
+        .reserve_signup_token(
+            "expired@example.com",
+            &expired_digest,
+            now - chrono::Duration::minutes(31),
+            now - chrono::Duration::minutes(1)
+        )
+        .await
+        .unwrap());
+    let rejected = app
+        .clone()
+        .oneshot(post(
+            "/auth/signup-email/complete",
+            json!({ "token": expired, "password": password }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    let complete = json!({ "token": token, "password": password, "display_name": "Verified" });
+    let first = app
+        .clone()
+        .oneshot(post("/auth/signup-email/complete", complete.clone()))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = app
+        .clone()
+        .oneshot(post("/auth/signup-email/complete", complete))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::BAD_REQUEST);
+
+    let login = app
+        .clone()
+        .oneshot(post("/auth/login", credentials))
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let cookie = session_cookie(&login);
+    let protected = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/sessions")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(protected.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn password_auth_register_login_and_gating() {
     let (state, _tmp) = test_state_password_auth().await;
     let app = build_router_with_auth(state)

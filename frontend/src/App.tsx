@@ -98,6 +98,10 @@ export default function App() {
                 host.local ? <Navigate to="/" replace /> : <ResetPassword />
               }
             />
+            <Route
+              path="/verify-email"
+              element={host.local ? <Navigate to="/" replace /> : <ResetPassword key="verify-email" signup />}
+            />
             <Route path="/" element={protect(<SessionList />)} />
             <Route
               path="/sessions/:id"

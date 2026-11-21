@@ -752,6 +752,106 @@ impl Repository for SqliteRepo {
         Ok(())
     }
 
+    async fn reserve_signup_token(
+        &self,
+        email: &str,
+        token_hash: &str,
+        now: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM signup_tokens WHERE expires_at <= ?")
+            .bind(now.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+        let reserved = sqlx::query(
+            "INSERT INTO signup_tokens (email, token_hash, sent_at, expires_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (email) DO UPDATE SET
+                 token_hash = excluded.token_hash,
+                 sent_at = excluded.sent_at,
+                 expires_at = excluded.expires_at
+             WHERE signup_tokens.sent_at <= ?",
+        )
+        .bind(email)
+        .bind(token_hash)
+        .bind(now.to_rfc3339())
+        .bind(expires_at.to_rfc3339())
+        .bind((now - chrono::Duration::minutes(1)).to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(reserved.rows_affected() == 1)
+    }
+
+    async fn remove_signup_token(&self, token_hash: &str) -> Result<()> {
+        sqlx::query("DELETE FROM signup_tokens WHERE token_hash = ?")
+            .bind(token_hash)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn has_valid_signup_token(
+        &self,
+        token_hash: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool> {
+        let found = sqlx::query_scalar::<_, i32>(
+            "SELECT 1 FROM signup_tokens WHERE token_hash = ? AND expires_at > ?",
+        )
+        .bind(token_hash)
+        .bind(now.to_rfc3339())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(found.is_some())
+    }
+
+    async fn complete_signup(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+        display_name: Option<&str>,
+        reserved_admins: &[String],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let email: Option<String> = sqlx::query_scalar(
+            "DELETE FROM signup_tokens WHERE token_hash = ? AND expires_at > ? RETURNING email",
+        )
+        .bind(token_hash)
+        .bind(now.to_rfc3339())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(email) = email else {
+            return Ok(false);
+        };
+        if reserved_admins.contains(&email) {
+            return Ok(false);
+        }
+        let created = sqlx::query(
+            "INSERT INTO users (email, display_name, password_hash, created_at, last_seen_at)
+             SELECT ?, ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM user_admins WHERE user_email = ?)
+             ON CONFLICT (email) DO UPDATE SET
+                 password_hash = excluded.password_hash,
+                 display_name = COALESCE(excluded.display_name, users.display_name),
+                 last_seen_at = excluded.last_seen_at
+             WHERE users.password_hash IS NULL
+               AND NOT EXISTS (SELECT 1 FROM user_admins WHERE user_email = users.email)",
+        )
+        .bind(&email)
+        .bind(display_name)
+        .bind(password_hash)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .bind(&email)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(created.rows_affected() == 1)
+    }
+
     async fn get_user_auth_version(&self, email: &str) -> Result<Option<i64>> {
         let row: Option<(i64,)> = sqlx::query_as("SELECT auth_version FROM users WHERE email = ?")
             .bind(email)
