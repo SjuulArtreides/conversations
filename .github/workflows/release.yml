@@ -1,0 +1,215 @@
+# CLI release build. Triggered by pushing a strict `vX.Y.Z` tag that matches
+# the `workspace.package.version` in `Cargo.toml`.
+#
+# Each build job rebuilds the public conversations CLI natively on its target
+# runner, embeds the frontend the same way CI does (`npm ci && npm run build`
+# before `cargo build`), verifies `--version` on the resulting binary, and
+# uploads `conversations-<version>-<target>.tar.gz` plus its `.sha256` sidecar
+# as a workflow artifact. Build jobs only need `contents: read` because they
+# never touch the release.
+#
+# The single `publish` job collects every artifact, creates or reuses a draft
+# release for the tag with `gh release create --verify-tag`, replaces the
+# draft's assets with this build's output, then flips the draft to published
+# with `--draft=false --latest`. A release that is already published is never
+# clobbered.
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must equal rust-toolchain.toml and the deploy/Dockerfile Rust image.
+  RUST_TOOLCHAIN: 1.96.0
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runs-on: ubuntu-22.04-arm
+          - target: aarch64-apple-darwin
+            runs-on: macos-15
+          - target: x86_64-apple-darwin
+            runs-on: macos-15-intel
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate tag against workspace version
+        id: meta
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag '$TAG' must be strict semver vX.Y.Z"
+            exit 1
+          fi
+          version="${TAG#v}"
+          cargo_version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::error::Workspace version in Cargo.toml is $cargo_version but tag is $TAG"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-${{ matrix.target }}
+          save-if: false
+
+      - name: Build the shared frontend the CLI embeds
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the CLI
+        env:
+          # Make build.rs fail loudly if the frontend step above was skipped.
+          CONVERSATIONS_REQUIRE_FRONTEND: "1"
+        run: cargo build --locked --release -p conversations-cli --target ${{ matrix.target }}
+
+      - name: Verify --version on the built binary
+        run: "./target/${{ matrix.target }}/release/conversations --version"
+
+      - name: Package archive and checksum
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d)"
+          cp "target/${TARGET}/release/conversations" "$staging/conversations"
+          chmod +x "$staging/conversations"
+          archive="conversations-${VERSION}-${TARGET}.tar.gz"
+          tar -czf "$archive" -C "$staging" conversations
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: conversations-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: assets
+          pattern: conversations-*
+          merge-multiple: true
+
+      - name: Verify downloaded artifacts
+        shell: bash
+        working-directory: assets
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          expected_targets=(
+            x86_64-unknown-linux-gnu
+            aarch64-unknown-linux-gnu
+            aarch64-apple-darwin
+            x86_64-apple-darwin
+          )
+          for target in "${expected_targets[@]}"; do
+            archive="conversations-${version}-${target}.tar.gz"
+            if [ ! -f "$archive" ]; then
+              echo "::error::Missing expected archive $archive"
+              exit 1
+            fi
+            if [ ! -f "$archive.sha256" ]; then
+              echo "::error::Missing expected checksum $archive.sha256"
+              exit 1
+            fi
+          done
+          shopt -s nullglob
+          archives=(conversations-*.tar.gz)
+          checksums=(conversations-*.tar.gz.sha256)
+          shopt -u nullglob
+          if [ "${#archives[@]}" -ne 4 ] || [ "${#checksums[@]}" -ne 4 ]; then
+            echo "::error::Expected 4 tar+checksum pairs, got ${#archives[@]} archives and ${#checksums[@]} checksums"
+            exit 1
+          fi
+          sha256sum -c conversations-*.tar.gz.sha256
+
+      - name: Publish release from built assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json isDraft --jq '.isDraft' >/tmp/draft.txt 2>/dev/null; then
+            is_draft="$(cat /tmp/draft.txt)"
+            if [ "$is_draft" != "true" ]; then
+              echo "Release $TAG is already published; refusing to clobber."
+              exit 0
+            fi
+            echo "Draft release $TAG already exists; replacing its assets with this build."
+            gh release upload "$TAG" assets/* --clobber
+          else
+            # --verify-tag requires the pushed tag to already exist in the repo.
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "$TAG" \
+              --notes "Prebuilt conversations CLI archives for $TAG. Download an archive and its .sha256 sidecar and verify with sha256sum -c or shasum -a 256 -c." \
+              assets/*
+          fi
+          gh release edit "$TAG" --draft=false --latest

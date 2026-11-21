@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBrowserPublication } from "@/lib/browserPublication";
 import { inspectHostAccess } from "@/lib/hostSetup";
@@ -318,6 +318,42 @@ export function HostSetup({ active = true }: { active?: boolean }) {
           current={verified && !ready}
         />
       </ol>
+      {!host && (
+        <div
+          aria-labelledby="host-cli-download-heading"
+          className="space-y-2 rounded-lg border border-border/70 p-4 text-sm"
+        >
+          <p id="host-cli-download-heading" className="font-medium">
+            Install the conversations CLI on that machine
+          </p>
+          <p className="text-muted-foreground">
+            Download the archive for your platform, then run{" "}
+            <code>conversations host</code>.
+          </p>
+          <div>
+            <a
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              href="https://github.com/SjuulArtreides/conversations/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Download Conversations
+            </a>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Or{" "}
+            <a
+              className="underline"
+              href="https://github.com/SjuulArtreides/conversations#run-from-source"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              build from source
+            </a>
+            .
+          </p>
+        </div>
+      )}
       {!host && (
         <form onSubmit={(event) => void connect(event)} className="space-y-3">
           <p className="text-sm text-muted-foreground">

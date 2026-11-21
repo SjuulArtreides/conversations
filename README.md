@@ -64,6 +64,54 @@ Claude Code, Codex, OpenCode, and cmux installations are separate prerequisites
 for the integrations you choose to use. The optional `adk code` launcher is
 an existing Arrakis DevKit integration, not a requirement for this application.
 
+## Install the CLI from a release
+
+Tagged releases publish prebuilt `conversations` binaries as GitHub release
+assets: see the
+[latest release](https://github.com/SjuulArtreides/conversations/releases/latest).
+Pick the archive for your platform from the table below, verify the `.sha256`
+sidecar before extracting, and install the binary under `$HOME/.local/bin`
+(no sudo required). The example below uses the 0.69.1 archive for macOS Apple
+Silicon; replace `ARCHIVE` with the filename that matches your platform and
+release version:
+
+```sh
+ARCHIVE=conversations-0.69.1-aarch64-apple-darwin.tar.gz
+shasum -a 256 -c "$ARCHIVE.sha256"
+tar -xzf "$ARCHIVE"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 conversations "$HOME/.local/bin/conversations"
+"$HOME/.local/bin/conversations" --version
+```
+
+Make sure `$HOME/.local/bin` is on your `PATH`. The sidecar uses
+`shasum -a 256` output that both `sha256sum -c` and `shasum -a 256 -c` accept.
+Supported targets:
+
+| Platform | Target triple |
+|----------|---------------|
+| Linux x86-64 | `x86_64-unknown-linux-gnu` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` |
+| macOS Apple Silicon | `aarch64-apple-darwin` |
+| macOS Intel | `x86_64-apple-darwin` |
+
+### Tagging a release
+
+The release workflow (`.github/workflows/release.yml`) builds natively for
+every target, verifies each binary, and uploads archives plus checksums to a
+draft release that it publishes once every build succeeds. To cut a release,
+bump `workspace.package.version` in `Cargo.toml`, merge the bump to `main`,
+then tag that commit with a strict `vX.Y.Z` tag matching the version and
+push it:
+
+```sh
+git tag -a v0.70.0 -m "v0.70.0"
+git push origin v0.70.0
+```
+
+The workflow refuses to run unless the tag is strict `vX.Y.Z` and matches
+the workspace version.
+
 ## Docker
 
 Build the bundled server and frontend locally:
