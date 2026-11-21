@@ -24,6 +24,7 @@ vi.mock("@/lib/api", async (orig) => {
         .fn()
         .mockResolvedValue({ email: "dev@example.com", display_name: "Dev" }),
       register: vi.fn(),
+      requestSignupEmail: vi.fn().mockResolvedValue({ ok: true }),
     },
   };
 });
@@ -34,6 +35,7 @@ import { enableTerminalCache } from "@/lib/terminalCache";
 function authFlags(flags: {
   google_enabled: boolean;
   password_enabled: boolean;
+  signup_verification_enabled?: boolean;
 }) {
   vi.mocked(api.authConfig).mockResolvedValue({ ...flags, user: null });
 }
@@ -46,6 +48,25 @@ beforeEach(() => {
 const isPrimary = (el: Element) => el.classList.contains("bg-primary");
 
 describe("Login", () => {
+  it("requests a verification email before collecting a signup password", async () => {
+    authFlags({
+      google_enabled: false,
+      password_enabled: true,
+      signup_verification_enabled: true,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<Login />, { route: "/login" });
+
+    await user.click(await screen.findByRole("button", { name: "Create account" }));
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Email"), "dev@example.com");
+    await user.click(screen.getByRole("button", { name: "Send verification email" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Check your inbox");
+    expect(api.requestSignupEmail).toHaveBeenCalledWith("dev@example.com");
+    expect(api.register).not.toHaveBeenCalled();
+  });
+
   it("submits the password login form with the entered credentials", async () => {
     const user = userEvent.setup();
     const { container } = renderWithProviders(<Login />, { route: "/login" });

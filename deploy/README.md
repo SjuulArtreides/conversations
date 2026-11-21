@@ -29,7 +29,7 @@ instead of serving, when:
 What an operator configures:
 
 - **Email + password only:** nothing beyond the default. Because registration
-  has no email verification, create the administrator accounts first, then list
+  has no email verification by default, create the administrator accounts first, then list
   them in `INITIAL_ADMIN_EMAILS` (comma-separated). Those addresses cannot
   self-register afterwards and cannot be revoked in the app.
 - **Google SSO:** set all of `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and
@@ -101,6 +101,24 @@ Apply the base directly on a real cluster with `kubectl apply -k deploy/k8s`
   selects the Postgres backend by URL scheme. Keep `replicas: 1` for live
   connection and host relay state. Provision Postgres separately and put the
   URL in a Secret.
+
+## SMTP signup verification (optional)
+
+Set all three keys in a Kubernetes Secret named `conversations-signup-smtp`
+in the `arrakis-conversations` namespace, then restart the deployment. Keep
+the secret values in your secret manager.
+
+| Secret key | Value |
+|------|---------|
+| `SIGNUP_SMTP_URL` | Authenticated `smtps://` URL. Percent-encode the username and password. For TransIP, the relay is `smtp.transip.email:465`. |
+| `SIGNUP_EMAIL_FROM` | Sender mailbox address, e.g. `conversations@kubemaster.com`. |
+| `SIGNUP_PUBLIC_URL` | Public HTTPS origin, e.g. `https://conversations.kubemaster.com`. |
+
+The sign-up form sends an email link. The recipient follows that link to
+choose a password and create their account. Links expire after 30 minutes
+and work once. A recipient can request another link after one minute, which
+replaces their previous link. The server limits signup mail to 60 attempts
+per hour. Existing password accounts and active sessions keep their access.
 
 ## Google SSO (optional)
 

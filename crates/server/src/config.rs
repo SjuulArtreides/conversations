@@ -24,8 +24,10 @@ pub struct Config {
     /// Whether email+password login is enabled (only relevant when
     /// `auth_enabled`). Env: `PASSWORD_AUTH_ENABLED`, default `true`. This lets
     /// you turn on real identities — and therefore sharing — with no Google
-    /// configuration at all. There is intentionally no email verification.
+    /// configuration at all. SMTP verification for new accounts is optional.
     pub password_auth_enabled: bool,
+
+    pub signup_email: SignupEmailConfig,
 
     /// Normalized bootstrap administrator email addresses. Env:
     /// `INITIAL_ADMIN_EMAILS`, as a comma-separated list. These administrators
@@ -92,6 +94,24 @@ pub struct Config {
     pub live_abandon_after_secs: u64,
 }
 
+/// SMTP signup settings. Debug output must never include the SMTP URL credentials.
+#[derive(Clone, Default)]
+pub struct SignupEmailConfig {
+    pub smtp_url: Option<String>,
+    pub from: Option<String>,
+    pub public_url: Option<String>,
+}
+
+impl std::fmt::Debug for SignupEmailConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignupEmailConfig")
+            .field("smtp_configured", &self.smtp_url.is_some())
+            .field("from", &self.from)
+            .field("public_url", &self.public_url)
+            .finish()
+    }
+}
+
 /// Default transcript request body limit: 32 MiB (matches ingress
 /// `proxy-body-size`).
 const DEFAULT_MAX_UPLOAD_BYTES: usize = 32 * 1024 * 1024;
@@ -125,6 +145,7 @@ impl Default for Config {
             google_client_secret: None,
             oidc_redirect_url: None,
             allowed_hosted_domain: None,
+            signup_email: SignupEmailConfig::default(),
             static_dir: None,
             cookie_secure: false,
             max_upload_bytes: DEFAULT_MAX_UPLOAD_BYTES,
@@ -151,16 +172,23 @@ impl Config {
             .map(|v| parse_bool(&v))
             .unwrap_or(default.password_auth_enabled);
         let oidc_redirect_url = env_opt("OIDC_REDIRECT_URL");
-        // Secure cookies default on only when auth is enabled behind https, so
-        // local http dev keeps working without setting COOKIE_SECURE.
+        let signup_email = SignupEmailConfig {
+            smtp_url: env_opt("SIGNUP_SMTP_URL"),
+            from: env_opt("SIGNUP_EMAIL_FROM"),
+            public_url: env_opt("SIGNUP_PUBLIC_URL"),
+        };
+        // Local HTTP still works when neither hosted auth flow is configured.
         let cookie_secure = match std::env::var("COOKIE_SECURE") {
             Ok(v) => parse_bool(&v),
             Err(_) => {
                 auth_enabled
-                    && oidc_redirect_url
-                        .as_deref()
-                        .map(|u| u.starts_with("https"))
-                        .unwrap_or(false)
+                    && [
+                        oidc_redirect_url.as_deref(),
+                        signup_email.public_url.as_deref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .any(|url| url.starts_with("https://"))
             }
         };
         let max_upload_bytes = std::env::var("MAX_UPLOAD_BYTES")
@@ -173,6 +201,7 @@ impl Config {
             database_url: std::env::var("DATABASE_URL").unwrap_or(default.database_url),
             auth_enabled,
             password_auth_enabled,
+            signup_email,
             initial_admin_emails: parse_email_list(
                 &std::env::var("INITIAL_ADMIN_EMAILS").unwrap_or_default(),
             ),

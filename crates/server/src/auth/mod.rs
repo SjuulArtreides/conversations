@@ -7,8 +7,7 @@
 //!
 //! Two login methods run in parallel, each independently toggleable:
 //!   * **Email + password** (`PASSWORD_AUTH_ENABLED`, default on) — register and
-//!     log in with an email + password, NO email verification. This is what lets
-//!     real identities (and therefore sharing) work with zero Google config.
+//!     log in with an email + password, with optional SMTP signup verification.
 //!   * **Google SSO (OIDC)** (active only when all three Google vars are set).
 //!
 //! ## Login flow (flag on)
@@ -57,6 +56,7 @@
 //! no changes.
 
 pub mod oidc;
+pub mod signup_email;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -109,6 +109,7 @@ pub struct AuthLayers {
     pub client: Option<OidcClient>,
     pub google_enabled: bool,
     pub password_enabled: bool,
+    pub signup_mailer: Option<signup_email::SignupMailer>,
 }
 
 /// Build the auth layers from config. Performs OIDC discovery (one network
@@ -149,6 +150,7 @@ pub async fn build_auth(
         client,
         google_enabled,
         password_enabled: config.password_auth_enabled,
+        signup_mailer: signup_email::SignupMailer::build(config)?,
     })
 }
 
@@ -881,6 +883,7 @@ async fn auth_config(
     Ok(Json(json!({
         "google_enabled": state.config.google_configured(),
         "password_enabled": state.config.password_auth_enabled,
+        "signup_verification_enabled": state.config.signup_email.smtp_url.is_some(),
         "user": user,
     }))
     .into_response())
@@ -895,7 +898,11 @@ fn session_err(e: tower_sessions::session::Error) -> AppError {
 /// routes are mounted only when `google_enabled`; password routes only when
 /// `password_enabled`. The OIDC client extension is layered on in
 /// `build_router` (only when a client exists).
-pub fn routes(google_enabled: bool, password_enabled: bool) -> Router<AppState> {
+pub fn routes(
+    google_enabled: bool,
+    password_enabled: bool,
+    signup_verification: bool,
+) -> Router<AppState> {
     let mut router = Router::new()
         .route("/auth/logout", post(logout))
         .route("/api/me", get(me))
@@ -913,13 +920,23 @@ pub fn routes(google_enabled: bool, password_enabled: bool) -> Router<AppState> 
 
     if password_enabled {
         router = router
-            .route("/auth/register", post(register))
             .route("/auth/login", post(password_login))
             .route("/auth/password-reset", post(reset_password))
             .route(
                 "/api/admin/password-reset-links",
                 post(create_password_reset_link),
             );
+    }
+
+    if signup_verification {
+        router = router
+            .route("/auth/signup-email", post(signup_email::request_link))
+            .route(
+                "/auth/signup-email/complete",
+                post(signup_email::complete_signup),
+            );
+    } else if password_enabled {
+        router = router.route("/auth/register", post(register));
     }
 
     if google_enabled {

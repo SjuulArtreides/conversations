@@ -440,6 +440,20 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  requestSignupEmail: (email: string) =>
+    request<{ ok: true }>("/auth/signup-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }),
+
+  completeSignup: (token: string, password: string, display_name?: string) =>
+    request<{ ok: true }>("/auth/signup-email/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password, display_name }),
+    }),
+
   login: (body: { email: string; password: string }) =>
     request<CurrentUser>("/auth/login", {
       method: "POST",

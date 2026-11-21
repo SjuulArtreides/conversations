@@ -33,6 +33,7 @@ export function useAuth() {
     isAdmin: config?.user?.is_admin ?? false,
     googleEnabled: config?.google_enabled ?? false,
     passwordEnabled: config?.password_enabled ?? false,
+    signupVerificationEnabled: config?.signup_verification_enabled ?? false,
   };
 }
 

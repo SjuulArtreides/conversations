@@ -714,6 +714,33 @@ pub trait Repository:
     /// [`Repository::upsert_user`]).
     async fn set_password(&self, email: &str, password_hash: &str) -> Result<()>;
 
+    /// Reserve a signup email, with a cooldown per recipient.
+    async fn reserve_signup_token(
+        &self,
+        email: &str,
+        token_hash: &str,
+        now: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool>;
+
+    async fn remove_signup_token(&self, token_hash: &str) -> Result<()>;
+
+    async fn has_valid_signup_token(
+        &self,
+        token_hash: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool>;
+
+    /// Consume a valid token and set an initial password in the same transaction.
+    async fn complete_signup(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+        display_name: Option<&str>,
+        reserved_admins: &[String],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool>;
+
     /// Return the account's current authentication version, or `None` when the
     /// user does not exist. Sessions with an older version are invalid.
     async fn get_user_auth_version(&self, email: &str) -> Result<Option<i64>>;

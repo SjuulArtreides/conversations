@@ -11,8 +11,10 @@ import { Spinner } from "@/components/states";
 type Mode = "login" | "register";
 
 export function Login() {
-  const { isLoading, authEnabled, user, googleEnabled, passwordEnabled } =
-    useAuth();
+  const {
+    isLoading, authEnabled, user, googleEnabled, passwordEnabled,
+    signupVerificationEnabled,
+  } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -22,6 +24,8 @@ export function Login() {
   const [displayName, setDisplayName] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  const [requestedEmail, setRequestedEmail] = React.useState<string | null>(null);
+  const emailFirst = mode === "register" && signupVerificationEnabled;
 
   // With SSO present, the password path must not compete with the primary
   // Google action.
@@ -38,6 +42,11 @@ export function Login() {
     setError(null);
     setSubmitting(true);
     try {
+      if (emailFirst) {
+        await api.requestSignupEmail(email);
+        setRequestedEmail(email);
+        return;
+      }
       if (mode === "register") {
         await api.register({
           email,
@@ -123,7 +132,7 @@ export function Login() {
           </div>
 
           <form onSubmit={onSubmit} className="flex flex-col gap-3">
-            {mode === "register" && (
+            {mode === "register" && !emailFirst && (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Name (optional)</span>
                 <Input
@@ -146,7 +155,7 @@ export function Login() {
                 placeholder="you@example.com"
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
+            {!emailFirst && <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">Password</span>
               <Input
                 type="password"
@@ -161,8 +170,14 @@ export function Login() {
                   mode === "register" ? "At least 8 characters" : "••••••••"
                 }
               />
-            </label>
+            </label>}
 
+            {emailFirst && requestedEmail === email && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Check your inbox for a verification link if this address can sign up.
+                You can request another link after one minute.
+              </p>
+            )}
             {error && (
               <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
                 {error}
@@ -177,9 +192,9 @@ export function Login() {
             >
               {submitting
                 ? "Please wait…"
-                : mode === "register"
-                  ? "Create account"
-                  : "Sign in"}
+                : emailFirst
+                  ? requestedEmail === email ? "Resend verification email" : "Send verification email"
+                  : mode === "register" ? "Create account" : "Sign in"}
             </Button>
           </form>
         </>

@@ -38,6 +38,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: conversations-config
+            - secretRef:
+                name: conversations-signup-smtp
+                optional: true
           # Google SSO secret. Marked optional so the pod starts with
           # email+password login only when the secret is absent.
           env:

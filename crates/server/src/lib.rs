@@ -158,12 +158,17 @@ pub async fn build_router_with_auth(state: AppState) -> anyhow::Result<Router> {
         client,
         google_enabled,
         password_enabled,
+        signup_mailer,
     } = auth::build_auth(&state.config, session_store).await?;
 
     let static_dir = state.config.static_dir.clone();
     let mut router = Router::new()
         .merge(api::routes(state.config.max_upload_bytes))
-        .merge(auth::routes(google_enabled, password_enabled));
+        .merge(auth::routes(
+            google_enabled,
+            password_enabled,
+            signup_mailer.is_some(),
+        ));
     router = with_static(router, static_dir.as_deref());
 
     let auth_state = state.clone();
@@ -175,6 +180,9 @@ pub async fn build_router_with_auth(state: AppState) -> anyhow::Result<Router> {
     // OIDC client available to the auth handlers — only when Google is wired.
     if let Some(client) = client {
         router = router.layer(axum::Extension(client));
+    }
+    if let Some(mailer) = signup_mailer {
+        router = router.layer(axum::Extension(mailer));
     }
     let router = router
         // Session layer outermost (runs first) so Session is in extensions.

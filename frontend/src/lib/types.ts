@@ -296,6 +296,7 @@ export interface AdminDirectoryUser {
 export interface AuthConfig {
   google_enabled: boolean;
   password_enabled: boolean;
+  signup_verification_enabled?: boolean;
   user: CurrentUser | null;
 }
 
