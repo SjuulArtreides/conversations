@@ -117,6 +117,31 @@ it("connects a public machine descriptor in browser-key mode and keeps browser n
   expect(mocks.unlock).not.toHaveBeenCalled();
 });
 
+it("offers a latest CLI download link only when no machine is paired", async () => {
+  const { unmount } = renderWithProviders(<HostSetup />);
+  const link = screen.getByRole("link", { name: "Download Conversations" });
+  expect(link).toHaveAttribute(
+    "href",
+    "https://github.com/SjuulArtreides/conversations/releases/latest",
+  );
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(
+    screen.getByRole("link", { name: "build from source" }),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/SjuulArtreides/conversations#run-from-source",
+  );
+  unmount();
+
+  mocks.online.mockResolvedValue(false);
+  await connect();
+  renderWithProviders(<HostSetup />);
+  await screen.findByText("Offline");
+  expect(
+    screen.queryByRole("link", { name: "Download Conversations" }),
+  ).toBeNull();
+});
+
 it("distinguishes a pending connection probe from an offline machine", async () => {
   await connect();
   let finish!: (online: boolean) => void;
