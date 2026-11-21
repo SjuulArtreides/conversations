@@ -76,10 +76,11 @@ The build selects your machine's architecture. Both Linux ARM64 and x86-64
 are supported; see [deployment](deploy/README.md#image-architecture) for a
 multi-platform build published under one tag.
 
-Prebuilt public images and release binaries are not published by this initial
-snapshot. See [deployment](deploy/README.md) for storage, authentication, and
-Kubernetes configuration. Run one server replica; Postgres alone does not
-provide multi-replica live-session support.
+CI publishes the server image to `ghcr.io/sjuulartreides/conversations` for
+Linux amd64 and arm64 after checks pass on `main`. Use the `sha-<full-commit-sha>`
+tag shown in the CI run summary. See [deployment](deploy/README.md) for storage,
+authentication, and Kubernetes configuration. Run one server replica; Postgres
+alone does not provide multi-replica live-session support.
 
 ## Security
 

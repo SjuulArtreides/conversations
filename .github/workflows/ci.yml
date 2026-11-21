@@ -1,6 +1,6 @@
 # PR checks: the Rust and ESLint gates prek runs locally (cargo fmt / clippy /
 # test, eslint), plus frontend tsc and vitest, enforced on every PR and on
-# pushes to main. Pure read-only verification — no secrets, no GitHub App, no deploy.
+# pushes to main. After the checks pass on main, publish the server image to GHCR.
 #
 # Toolchains come from the actions (not the nix flake) to keep runners fast and
 # the workflow self-contained. `cargo test --workspace` is sqlite-only (the
@@ -233,3 +233,64 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npm test
+
+  image-build:
+    name: Server image (${{ matrix.arch }})
+    if: >-
+      github.repository == 'SjuulArtreides/conversations' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rust, frontend]
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/sjuulartreides/conversations
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build server image
+        run: |
+          docker buildx build --load --platform "linux/$ARCH" \
+            --file deploy/Dockerfile \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE:sha-$GITHUB_SHA-$ARCH" .
+
+      - name: Push platform image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:sha-$GITHUB_SHA-$ARCH"
+
+  image-publish:
+    name: Publish server image
+    needs: image-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      packages: write
+    env:
+      IMAGE: ghcr.io/sjuulartreides/conversations
+    steps:
+      - name: Publish the multi-platform image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          tag="$IMAGE:sha-$GITHUB_SHA"
+          docker buildx imagetools create --tag "$tag" "$tag-amd64" "$tag-arm64"
+          docker buildx imagetools inspect "$tag"
+          printf 'Server image: %s\n' "$tag" >> "$GITHUB_STEP_SUMMARY"
