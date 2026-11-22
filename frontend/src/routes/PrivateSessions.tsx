@@ -13,7 +13,12 @@ import { useActiveHost } from "@/lib/useActiveHost";
 export { useActiveHost } from "@/lib/useActiveHost";
 import { AllHostSessionTabs } from "@/components/LiveTabs";
 import * as React from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   PrivateSessionCard,
@@ -357,14 +362,17 @@ export function PrivateSessionView() {
   const { id = "" } = useParams<{ id: string }>();
   const selectedHost = useActiveHost();
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const hostId = params.get("host") ?? selectedHost;
   React.useEffect(() => {
     if (!params.has("host") && selectedHost) {
       const next = new URLSearchParams(params);
       next.set("host", selectedHost);
-      setParams(next, { replace: true });
+      // Carry the navigation state over: "New session" uses it to ask the
+      // terminal to fit its grid to this screen once the session has loaded.
+      setParams(next, { replace: true, state: location.state });
     }
-  }, [params, selectedHost, setParams]);
+  }, [params, selectedHost, setParams, location.state]);
   // Remount all session-owned state before rendering another route or host.
   return (
     <SessionPrProvider hostId={hostId ?? undefined}>
