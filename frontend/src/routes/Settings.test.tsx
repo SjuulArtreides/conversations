@@ -830,6 +830,20 @@ describe("Settings sections", () => {
     ).toBeNull();
   });
 
+  it("does not fetch remote Launch settings until the Launch section opens", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Settings />);
+    await screen.findByRole("textbox", { name: "Browser name" });
+    await waitFor(() => expect(api.getUserSettings).toHaveBeenCalled());
+    expect(hostControl.getHostSettings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Appearance" }));
+    expect(hostControl.getHostSettings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() =>
+      expect(hostControl.getHostSettings).toHaveBeenCalledTimes(1),
+    );
+  });
+
   it("keeps browser names and unsaved preferences when switching sections", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Settings />);

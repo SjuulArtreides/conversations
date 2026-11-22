@@ -115,6 +115,7 @@ it("connects a public machine descriptor in browser-key mode and keeps browser n
   );
   expect(mocks.publish).not.toHaveBeenCalled();
   expect(mocks.unlock).not.toHaveBeenCalled();
+  expect(mocks.access).not.toHaveBeenCalled();
 });
 
 it("offers a latest CLI download link only when no machine is paired", async () => {
@@ -415,15 +416,19 @@ it("updates a waiting browser name explicitly and gives a copyable owner approva
   expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
 });
 
-it("restores publication and detects approval by polling without Retry, invalidating once", async () => {
+it("restores publication and detects approval on one explicit check, invalidating once", async () => {
   await connect();
   mocks.registration = true;
+  const user = userEvent.setup();
   const { queryClient } = renderWithProviders(<HostSetup />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   expect(
     await screen.findByText(/Waiting for browser approval on/),
   ).toBeVisible();
   mocks.access.mockResolvedValue({ canRead: true, canStart: true });
+  await user.click(
+    await screen.findByRole("button", { name: "Check browser approval" }),
+  );
   expect(
     await screen.findByRole("button", { name: "Go to sessions" }),
   ).toBeVisible();
@@ -534,6 +539,11 @@ it("preserves passkey mode, unlocks only on click and respects delegation expiry
 
 it("polls only while the section and document are visible, then stops on unmount", async () => {
   await connect();
+  // A transport failure keeps automatic checks running (unlike a confirmed
+  // not-approved refusal, which pauses them).
+  mocks.access.mockRejectedValue(
+    new HostControlError("Connection interrupted", "transport"),
+  );
   const { unmount } = renderWithProviders(<HostSetup active={false} />);
   await new Promise((resolve) => setTimeout(resolve, 75));
   expect(mocks.online).not.toHaveBeenCalled();
@@ -546,9 +556,9 @@ it("polls only while the section and document are visible, then stops on unmount
     return <HostSetup active={active} />;
   }
   const rendered = renderWithProviders(<Owner />);
-  await screen.findByRole("button", {
-    name: "Prepare this browser for approval",
-  });
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Connection interrupted",
+  );
   await act(async () => {
     setActive(false);
   });
@@ -669,3 +679,164 @@ it.each([
     expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
   },
 );
+
+it.each([
+  "too many private connection requests are open",
+  "too many private connections are open",
+])(
+  "shows host connection saturation as temporarily busy, not approval, and recovers: %s",
+  async (reason) => {
+    await connect();
+    mocks.registration = true;
+    mocks.access.mockRejectedValue(new HostControlError(reason, "refused"));
+    const { queryClient } = renderWithProviders(<HostSetup />);
+    expect(
+      await progress().findByText("Machine busy — checking again shortly"),
+    ).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "is busy handling private connections",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/permissions need review/i)).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Prepare this browser for approval",
+      }),
+    ).toBeNull();
+    expect(screen.queryByText(/Waiting for browser approval on/)).toBeNull();
+    // Busy does not trigger an extra immediate retry beyond normal polling.
+    const callsWhileBusy = mocks.access.mock.calls.length;
+    expect(callsWhileBusy).toBeLessThanOrEqual(2);
+
+    mocks.access.mockResolvedValue({ canRead: true, canStart: true });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["host-setup-access"] });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Go to sessions" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Machine busy — checking again shortly"),
+    ).toBeNull();
+  },
+);
+
+it("does not show an actual permission refusal as busy", async () => {
+  await connect();
+  mocks.registration = true;
+  mocks.access.mockRejectedValue(
+    new HostControlError("no current grant", "refused"),
+  );
+  renderWithProviders(<HostSetup />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Permissions need review",
+  );
+  expect(screen.queryByText("Machine busy — checking again shortly")).toBeNull();
+});
+
+it("stops automatic access handshakes while awaiting approval until the user checks, then resumes", async () => {
+  await connect();
+  mocks.registration = true;
+  const user = userEvent.setup();
+  const { queryClient } = renderWithProviders(<HostSetup />);
+  const check = await screen.findByRole("button", {
+    name: "Check browser approval",
+  });
+  expect(mocks.access).toHaveBeenCalledOnce();
+  const onlineCalls = mocks.online.mock.calls.length;
+
+  // Interval polling, focus, reconnect and invalidation request no handshake.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    await queryClient.invalidateQueries({ queryKey: ["host-setup-access"] });
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(mocks.access).toHaveBeenCalledOnce();
+  // The cheap online status poll keeps running.
+  expect(mocks.online.mock.calls.length).toBeGreaterThan(onlineCalls);
+  expect(screen.queryByText(/detects approval automatically/)).toBeNull();
+
+  // Still not approved: exactly one attempt, then paused again.
+  await user.click(check);
+  await waitFor(() => expect(mocks.access).toHaveBeenCalledTimes(2));
+  expect(
+    await screen.findByRole("button", { name: "Check browser approval" }),
+  ).toBeEnabled();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(mocks.access).toHaveBeenCalledTimes(2);
+
+  mocks.access.mockRejectedValue(
+    new HostControlError("Host was briefly offline", "offline"),
+  );
+  await user.click(check);
+  expect(await screen.findByText(/approval check could not finish/i)).toBeVisible();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(mocks.access).toHaveBeenCalledTimes(3);
+
+  // Approved: one check recovers and normal polling resumes.
+  mocks.access.mockResolvedValue({ canRead: true, canStart: true });
+  await user.click(
+    screen.getByRole("button", { name: "Check browser approval" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Go to sessions" }),
+  ).toBeVisible();
+  await waitFor(() =>
+    expect(mocks.access.mock.calls.length).toBeGreaterThan(4),
+  );
+});
+
+it("offers an explicit check right after publication without polling access", async () => {
+  await connect();
+  const user = userEvent.setup();
+  renderWithProviders(<HostSetup />);
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Prepare this browser for approval",
+    }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Check browser approval" }),
+  ).toBeVisible();
+  const calls = mocks.access.mock.calls.length;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(mocks.access).toHaveBeenCalledTimes(calls);
+});
+
+it("keys the approval pause on host and mode", async () => {
+  await connect();
+  mocks.registration = true;
+  renderWithProviders(<HostSetup />);
+  await screen.findByRole("button", { name: "Check browser approval" });
+  const other = await makeTestHost();
+  await act(async () => {
+    await pairHost(other.descriptor, "Laptop", "browser-key");
+  });
+  // A different host gets its own first automatic check.
+  await waitFor(() =>
+    expect(mocks.access.mock.calls.some(([id]) => id === other.id)).toBe(
+      true,
+    ),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Check browser approval" }),
+  ).toBeVisible();
+  // Passkey mode is never paused: it keeps polling and offers unlock.
+  mocks.access.mockRejectedValue(
+    new HostControlError("Delegation expired", "locked"),
+  );
+  await act(async () => {
+    setHostAuthMode(other.id, "passkey");
+  });
+  await screen.findByRole("button", { name: "Unlock with passkey" });
+  const count = mocks.access.mock.calls.length;
+  await waitFor(() =>
+    expect(mocks.access.mock.calls.length).toBeGreaterThan(count),
+  );
+  expect(
+    screen.queryByRole("button", { name: "Check browser approval" }),
+  ).toBeNull();
+});
