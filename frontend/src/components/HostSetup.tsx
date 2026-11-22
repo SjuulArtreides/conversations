@@ -352,7 +352,9 @@ export function HostSetup({
     : reviewNeeded
       ? "Needs review — permissions are limited"
       : hostBusy
-        ? "Machine busy — checking again shortly"
+        ? awaitingApproval
+          ? "Machine busy"
+          : "Machine busy — checking again shortly"
         : refusalReview
           ? insufficientPermissions
             ? "Needs review — current permissions are insufficient"
@@ -817,8 +819,10 @@ export function HostSetup({
       )}
       {hostBusy && (
         <p role="status" className="text-sm">
-          {host!.label} is busy handling private connections. This page will
-          check again automatically.
+          {host!.label} is busy handling private connections.{" "}
+          {awaitingApproval
+            ? "Check browser approval again shortly."
+            : "This page will check again automatically."}
         </p>
       )}
       {awaitingApproval &&

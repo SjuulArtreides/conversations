@@ -285,7 +285,9 @@ fn browser_key_flow(dir: &Path, server: &str, theme: &ColorfulTheme) -> Result<b
     let grants: Vec<String> = BROWSER_GRANTS.iter().map(|g| (*g).to_owned()).collect();
     let (kid, _) =
         authz::enroll_from_cli(dir, "owner", "es256", &public_key, BROWSER_LABEL, &grants)?;
-    eprintln!("Approved browser {kid}. The Host access page detects it automatically.");
+    eprintln!(
+        "Approved browser {kid}. Return to Host access and choose Check browser approval if shown."
+    );
     Ok(true)
 }
 
