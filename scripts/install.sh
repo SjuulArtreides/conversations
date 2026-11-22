@@ -225,8 +225,8 @@ else
   echo "the web app shows both commands with its address filled in."
 fi
 echo
-echo "The host prints the command that shows its public descriptor and where"
-echo "to paste it in Host access."
+echo "The host prints its public descriptor and where to paste it in"
+echo "Host access."
 if ! $on_path; then
   echo
   echo "Your PATH does not run this copy as plain '$BIN', so the commands above"

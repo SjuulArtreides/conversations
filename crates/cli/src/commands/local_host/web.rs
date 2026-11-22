@@ -7,6 +7,7 @@ mod attention;
 mod communications;
 #[path = "web_devices.rs"]
 mod devices;
+pub(super) use devices::{decide_device, pending_devices, setup_link};
 #[path = "web_linear.rs"]
 mod linear;
 #[path = "web_local.rs"]
