@@ -71,7 +71,54 @@ pub fn run(global: &GlobalOpts, args: &LoginArgs) -> Result<()> {
         }
     }
 
+    #[cfg(unix)]
+    host_handoff(global, &theme)?;
+
     Ok(())
+}
+
+/// After a successful login, name the exact command that starts host mode on
+/// this server and, on a terminal, offer to start it now (opt-in).
+#[cfg(unix)]
+fn host_handoff(global: &GlobalOpts, theme: &ColorfulTheme) -> Result<()> {
+    let exe = std::env::current_exe().ok();
+    println!(
+        "To start host mode on {}, run:\n  {}",
+        global.server,
+        host_command(exe.as_deref(), &global.server)
+    );
+    if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Ok(());
+    }
+    let start = Confirm::with_theme(theme)
+        .with_prompt("Start host mode now?")
+        .default(false)
+        .interact()
+        .context("failed to read confirmation")?;
+    if !start {
+        return Ok(());
+    }
+    // Parse exactly the printed command, so `host` takes the same environment
+    // defaults (e.g. CONVERSATIONS_HOST_DIR) it would when pasted.
+    let cli = <crate::cli::Cli as clap::Parser>::try_parse_from([
+        "conversations",
+        "--server",
+        global.server.as_str(),
+        "host",
+    ])?;
+    let crate::cli::Command::Host(host) = cli.command else {
+        unreachable!("`host` parses as the host command");
+    };
+    crate::commands::local_host::run(global, &host)
+}
+
+/// A POSIX-shell-safe command that runs this binary (PATH may lack it) as a
+/// foreground host on `server`.
+#[cfg(unix)]
+fn host_command(exe: Option<&std::path::Path>, server: &str) -> String {
+    let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
+    let program = exe.map_or("conversations".into(), |exe| quote(&exe.to_string_lossy()));
+    format!("{program} --server {} host", quote(server))
 }
 
 /// `logout` — drop the saved cookie for this server.
@@ -82,4 +129,31 @@ pub fn logout(global: &GlobalOpts) -> Result<()> {
         println!("No saved session for {}.", global.server);
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// Pasted into a POSIX shell, the command runs this exact executable with
+    /// this exact server, whatever characters either contains.
+    #[test]
+    fn host_command_is_shell_safe_and_explicit() {
+        let exe = std::path::Path::new("/opt/my tools/it's/$HOME/conversations");
+        let server = "https://conv.example/a b?x='y'&z=`id`";
+        let line = host_command(Some(exe), server);
+        let argv = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\0' {line}"))
+            .output()
+            .unwrap();
+        assert!(argv.status.success());
+        let argv: Vec<_> = argv
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .map(|arg| String::from_utf8(arg.to_vec()).unwrap())
+            .collect();
+        assert_eq!(argv, [exe.to_str().unwrap(), "--server", server, "host"]);
+    }
 }

@@ -531,6 +531,8 @@ pub async fn run(
     if host.cookie.is_none() {
         eprintln!("No localhost login: terminal mirroring works; browser session creation requires login.");
     }
+    let exe = std::env::current_exe().ok();
+    eprintln!("{}", pairing_hint(&host.server, exe.as_deref(), dir));
     let mut jobs = tokio::task::JoinSet::new();
     jobs.spawn(host.availability.clone().monitor(host.server.clone()));
     jobs.spawn(codex_delivery_loop(host.clone()));
@@ -598,6 +600,24 @@ pub async fn run(
     while jobs.join_next().await.is_some() {}
     eprintln!("Host stopped. Wrapped terminals remain local and reconnect when restarted.");
     Ok(())
+}
+
+/// Startup guidance for pairing a browser with this host. It names the command
+/// that prints the public descriptor for exactly this runtime directory; it
+/// never prints the descriptor itself. The command uses this executable's
+/// absolute path, because the installer may leave `conversations` off PATH.
+fn pairing_hint(server: &str, exe: Option<&Path>, dir: &Path) -> String {
+    use super::cmux::shell_quote;
+    let program = exe.map_or("conversations".into(), |exe| {
+        shell_quote(&exe.to_string_lossy())
+    });
+    let dir = shell_quote(&dir.to_string_lossy());
+    let server = server.trim_end_matches('/');
+    format!(
+        "To use this host from a browser, pair the browser with it. Keep this host running and, in another terminal, run:\n  \
+         {program} credential --runtime-dir {dir} descriptor\n\
+         Then open Host access at {server}/settings, paste the public host descriptor, click Connect machine, and follow the browser approval prompt."
+    )
 }
 
 async fn restore_saved_sessions(host: Arc<Host>) {
@@ -4335,6 +4355,61 @@ mod publication_tests;
 mod tests {
     use super::*;
     use conversations_core::{AgentKind, AgentLauncher};
+
+    #[test]
+    fn pairing_hint_names_a_pasteable_descriptor_command_for_this_runtime() {
+        let exe = Path::new("/opt/my tools/it's/conversations");
+        let dir = Path::new("/home/a user/it's $HOME `x` \"q\"/host dir");
+        let hint = pairing_hint("https://conversations.example/", Some(exe), dir);
+        let line = hint
+            .lines()
+            .map(str::trim)
+            .find(|line| line.ends_with(" descriptor"))
+            .expect("descriptor command line");
+        // Pasted into a POSIX shell, the line must run this exact executable
+        // (PATH may lack `conversations`) with the exact runtime directory.
+        let argv = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\0' {line}"))
+            .output()
+            .unwrap();
+        assert!(argv.status.success());
+        let argv: Vec<_> = argv
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .map(|arg| String::from_utf8(arg.to_vec()).unwrap())
+            .collect();
+        assert_eq!(
+            argv,
+            [
+                exe.to_str().unwrap(),
+                "credential",
+                "--runtime-dir",
+                dir.to_str().unwrap(),
+                "descriptor"
+            ]
+        );
+        assert!(
+            pairing_hint("https://conversations.example", None, Path::new("/d"))
+                .contains("\n  conversations credential --runtime-dir '/d' descriptor\n"),
+            "falls back to `conversations` when the executable path is unknown"
+        );
+        assert!(hint.contains("pair the browser"), "{hint}");
+        assert!(hint.contains("Keep this host running"), "{hint}");
+        assert!(hint.contains("another terminal"), "{hint}");
+        assert!(
+            hint.contains("open Host access at https://conversations.example/settings"),
+            "{hint}"
+        );
+        assert!(hint.contains("paste the public host descriptor"), "{hint}");
+        assert!(hint.contains("click Connect machine"), "{hint}");
+        assert!(hint.contains("browser approval prompt"), "{hint}");
+        assert!(
+            !hint.contains("chd1."),
+            "the descriptor itself is never printed"
+        );
+    }
 
     #[test]
     fn normal_wrapper_uses_daemon_server_instead_of_saved_default() {

@@ -5,7 +5,7 @@ exclude = ["vendor/vt100"]
 
 [workspace.package]
 # The initial public snapshot preserves the source application's version.
-version = "0.69.1"
+version = "0.69.2"
 edition = "2021"
 license = "MIT"
 authors = ["Arrakis Engineering"]

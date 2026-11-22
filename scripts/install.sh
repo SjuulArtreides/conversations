@@ -10,7 +10,14 @@
 # Usage:
 #   bash scripts/install.sh                 # latest release
 #   bash scripts/install.sh v0.69.1         # a specific vX.Y.Z tag
+#   bash scripts/install.sh --server https://conversations.example.com
 #   INSTALL_DIR=/usr/local/bin bash scripts/install.sh
+#
+# --server takes the web origin of the conversations server this machine
+# should use (scheme, host and optional port; no path). It only changes the
+# next-step commands printed at the end: the installer itself never contacts
+# that server or saves it anywhere. Host access in the web app passes its own
+# origin here, so the printed login command targets the same server.
 #
 # Review this script before running it.
 
@@ -19,12 +26,41 @@ set -euo pipefail
 REPO="SjuulArtreides/conversations"
 BIN="conversations"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-TAG="${1:-}"
+TAG=""
+SERVER=""
 
 err() {
   printf 'error: %s\n' "$1" >&2
   exit 1
 }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --server)
+      [ $# -ge 2 ] || err "--server needs a URL, e.g. --server https://conversations.example.com"
+      SERVER="$2"
+      shift 2 ;;
+    --server=*)
+      SERVER="${1#--server=}"
+      shift ;;
+    -*) err "unknown option: $1" ;;
+    *)
+      [ -z "$TAG" ] || err "unexpected argument: $1"
+      TAG="$1"
+      shift ;;
+  esac
+done
+
+# Accept only a canonical web origin, exactly what a browser reports as
+# `location.origin`: http(s), a lowercase DNS name, IPv4 or bracketed IPv6
+# host, and an optional port. Its characters are therefore all shell-inert,
+# and it is still quoted when printed. Validate before downloading anything.
+if [ -n "$SERVER" ]; then
+  while [ "${SERVER%/}" != "$SERVER" ]; do SERVER="${SERVER%/}"; done
+  origin_regex='^https?://([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:[0-9]{1,5})?$'
+  [[ "$SERVER" =~ $origin_regex ]] \
+    || err "--server must be a web origin such as https://conversations.example.com (lowercase, no path, query or credentials); got '$SERVER'"
+fi
 
 command -v curl >/dev/null 2>&1 || err "curl is required"
 command -v tar  >/dev/null 2>&1 || err "tar is required"
@@ -122,12 +158,80 @@ chmod +x "$tmp/$BIN"
   || err "staged binary failed to execute — keeping the existing $INSTALL_DIR/$BIN"
 
 mkdir -p "$INSTALL_DIR"
+# Resolve to an absolute path so the printed fallback command works from any
+# directory, even when INSTALL_DIR was given relative.
+INSTALL_DIR="$(CDPATH='' cd -- "$INSTALL_DIR" && pwd)"
 mv -f "$tmp/$BIN" "$INSTALL_DIR/$BIN"
 
+# Quote a value for pasting into any POSIX-style shell (bash, zsh, sh).
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# Drop trailing slashes so "/home/me/.local/bin/" matches "/home/me/.local/bin".
+strip_slashes() {
+  local dir="$1"
+  while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do
+    dir="${dir%/}"
+  done
+  printf '%s' "$dir"
+}
+
+# The bare command name is only safe to suggest when PATH resolves it to the
+# copy just installed; otherwise an older install elsewhere would run instead.
+on_path=false
+want="$(strip_slashes "$INSTALL_DIR")"
+IFS=: read -r -a path_dirs <<< "$PATH"
+# `${a[@]+...}` keeps `set -u` happy on macOS bash 3.2 if PATH is empty.
+for dir in ${path_dirs[@]+"${path_dirs[@]}"}; do
+  [ -n "$dir" ] || continue
+  if [ -x "$dir/$BIN" ] && [ ! -d "$dir/$BIN" ]; then
+    [ "$(strip_slashes "$dir")" = "$want" ] && on_path=true
+    break
+  fi
+done
+
 echo "Installed $BIN to $INSTALL_DIR/$BIN"
-case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *)
-    echo "note: $INSTALL_DIR is not on your PATH — add it, e.g.:"
-    echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc" ;;
-esac
+echo
+if $on_path; then
+  program="$BIN"
+else
+  program="$(shell_quote "$INSTALL_DIR/$BIN")"
+fi
+if [ -n "$SERVER" ]; then
+  server_flag="--server $(shell_quote "$SERVER")"
+  echo "Next, log in to $SERVER on this machine:"
+  echo
+  echo "  $program login $server_flag"
+  echo
+  echo "After login it offers to start the host. Keep the host running."
+  echo
+  echo "Already logged in to this server, or it does not require login? Start"
+  echo "the host directly instead:"
+  echo
+  echo "  $program host $server_flag"
+else
+  echo "Next, start the host on this machine and keep it running:"
+  echo
+  echo "  $program host"
+  echo
+  echo "Without --server, CONVERSATIONS_SERVER or a server saved by login, the"
+  echo "CLI uses http://localhost:8080. For any other server, log in first with"
+  echo "its web address in place of the example (login offers to start the host):"
+  echo
+  echo "  $program login --server https://conversations.example.com"
+  echo
+  echo "or add the same --server <URL> to the host command above. Host access in"
+  echo "the web app shows both commands with its address filled in."
+fi
+echo
+echo "The host prints the command that shows its public descriptor and where"
+echo "to paste it in Host access."
+if ! $on_path; then
+  echo
+  echo "Your PATH does not run this copy as plain '$BIN', so the commands above"
+  echo "use the full path. No shell config change is needed. To use plain"
+  echo "'$BIN' in this terminal only, run:"
+  echo
+  echo "  export PATH=$(shell_quote "$INSTALL_DIR"):\"\$PATH\""
+fi
