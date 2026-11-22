@@ -53,6 +53,7 @@ fn help_shows_the_conversations_command_and_its_current_commands() {
             "logout",
             "ping",
             "pr",
+            "self-update",
             "help"
         ],
         "{help}"

@@ -94,6 +94,10 @@ pub enum Command {
     Ping,
     /// Manage GitHub PR status for a session (fetched via the local `gh` CLI).
     Pr(PrArgs),
+    /// Replace this executable with the latest published release after
+    /// verifying its checksum and version. Running hosts are not restarted.
+    #[cfg(unix)]
+    SelfUpdate(crate::commands::self_update::SelfUpdateArgs),
 }
 
 #[derive(Debug, Args)]

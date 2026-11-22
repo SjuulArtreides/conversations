@@ -44,6 +44,9 @@ base64 = { workspace = true }
 vt100 = "0.16"
 unicode-width = "0.2.2"
 tempfile = "3.27.0"
+# Decompress release archives for `self-update` (already in the lockfile).
+flate2 = "1.1.10"
+tar = { version = "0.4.46", default-features = false }
 # Sans-IO WebRTC for the private browser channel (DTLS + SCTP data channel). Pure-Rust
 # crypto backend; keep the exact version pin for the private-channel protocol.
 str0m = { version = "=0.25.0", default-features = false, features = ["rust-crypto"] }
