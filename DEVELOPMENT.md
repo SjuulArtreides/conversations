@@ -101,3 +101,18 @@ uv run scripts/test-cmux-compatibility.py --target-dir target
 
 This test uses a fake cmux inventory and real host, server, and wrapper
 processes. It never creates native windows.
+
+## Releases
+
+Bump `version` under `[workspace.package]` in `Cargo.toml` in a pull request
+and refresh the lockfile with `cargo update -w`. Use a minor bump for new
+features and a patch bump for fixes. After the merge, when CI passes on
+`main`, the `Tag release` workflow:
+
+1. tags the merge commit `vX.Y.Z`;
+2. tags the server image `ghcr.io/sjuulartreides/conversations:vX.Y.Z`;
+3. starts `Release CLI`, which publishes the CLI archives that
+   `conversations self-update` and `scripts/install.sh` install.
+
+A merge that keeps the same version releases nothing. Do not push release
+tags by hand.

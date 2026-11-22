@@ -172,9 +172,10 @@ are supported; see [deployment](deploy/README.md#image-architecture) for a
 multi-platform build published under one tag.
 
 CI publishes the server image to `ghcr.io/sjuulartreides/conversations` for
-Linux amd64 and arm64 after checks pass on `main`. Use the `sha-<full-commit-sha>`
-tag shown in the CI run summary. See [deployment](deploy/README.md) for storage,
-authentication, and Kubernetes configuration. Run one server replica; Postgres
+Linux amd64 and arm64 after checks pass on `main`, tagged `sha-<full-commit-sha>`.
+Each release also tags its image `vX.Y.Z`; see [releases](DEVELOPMENT.md#releases).
+See [deployment](deploy/README.md) for storage, authentication, and Kubernetes
+configuration. Run one server replica; Postgres
 alone does not provide multi-replica live-session support.
 
 ## Security
