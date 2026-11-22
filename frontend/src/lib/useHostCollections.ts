@@ -54,15 +54,16 @@ export function useHostCollections() {
           host.id,
           running ? "active-sessions" : "sessions",
         ],
-        queryFn: async () =>
-          filterClosing(
-            privateScope(host.id),
-            await hostControl.privateRead(
-              host.id,
-              (channel) => listSessions(channel, { runningOnly: running }),
-              { allowUnlock: false },
-            ),
-          ),
+        queryFn: async () => {
+          const sessions = await hostControl.privateRead(
+            host.id,
+            (channel) => listSessions(channel, { runningOnly: running }),
+            { allowUnlock: false },
+          );
+          return running
+            ? filterClosing(privateScope(host.id), sessions)
+            : sessions;
+        },
         enabled: allowed[i],
         retry: false,
         staleTime: running ? 0 : 300_000,

@@ -65,16 +65,10 @@ export function useHostSessions(
 ) {
   const archive = useQuery({
     queryKey: privateSessionsKey(hostId),
-    queryFn: async () => {
-      const list = await hostControl.privateRead(
-        hostId!,
-        (c) => listSessions(c),
-        { allowUnlock: false },
-      );
-      // Keep a just-closed tab out even if this fetch was already in flight
-      // when the user hit ✕; the scope is per-host so sibling hosts untouched.
-      return filterClosing(privateScope(hostId!), list);
-    },
+    queryFn: () =>
+      hostControl.privateRead(hostId!, (c) => listSessions(c), {
+        allowUnlock: false,
+      }),
     enabled: hostId !== null && allowed,
     retry: false,
     staleTime: 300_000,
@@ -266,7 +260,9 @@ export function PrivateSessionList({
   );
   const running = sorted.filter((s) => s.running);
   const recent = sorted.filter(
-    (s) => !s.running && (s.messages > 0 || terms.length > 0),
+    (s) =>
+      !s.running &&
+      (s.messages > 0 || s.reopenable === true || terms.length > 0),
   );
   const visible = exactTitleFirst(
     [...running, ...recent.slice(0, recentLimit)],
@@ -274,7 +270,11 @@ export function PrivateSessionList({
     privateSessionTitle,
   );
   const empty = sorted.filter(
-    (s) => !s.running && s.messages === 0 && terms.length === 0,
+    (s) =>
+      !s.running &&
+      s.messages === 0 &&
+      s.reopenable !== true &&
+      terms.length === 0,
   );
   return (
     <div className="space-y-4" data-testid="private-sessions">

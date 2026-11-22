@@ -6,6 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils";
 import type { Summary, Visibility } from "@/lib/types";
 import { SessionList } from "./SessionList";
+import { PrivateSessionTabs } from "@/components/LiveTabs";
+import type { PrivateChannel } from "@/lib/privateChannel";
 import { activeHost } from "@/lib/hostPairing";
 
 function summary(
@@ -446,6 +448,76 @@ it("shows running private sessions while the archive is still loading", async ()
   expect(
     await screen.findByRole("link", { name: /Running now/ }),
   ).toBeVisible();
+});
+
+it("keeps a private conversation in Sessions after ending it from its live tab", async () => {
+  const { pairHost } = await import("@/lib/hostPairing");
+  const { makeTestHost } = await import("@/lib/testHost");
+  const { hostControl } = await import("@/lib/hostControl");
+  const host = await makeTestHost();
+  await pairHost(host.descriptor, "Laptop", "browser-key");
+  const session = {
+    id: "empty-conversation",
+    title: "Fresh conversation",
+    agent: "codex",
+    cwd: "/work",
+    running: true,
+    reopenable: true,
+    messages: 0,
+    last_activity: null,
+  };
+  let running = true;
+  const channel = {
+    sessionsList: async (
+      _after: unknown,
+      _limit: unknown,
+      runningOnly: boolean,
+    ) => ({
+      status: "executed",
+      detail: null,
+      body: {
+        kind: "sessions",
+        sessions: runningOnly && !running ? [] : [{ ...session, running }],
+        next: null,
+      },
+    }),
+  } as PrivateChannel;
+  vi.mocked(hostControl.privateRead).mockImplementation((_, read) =>
+    read(channel),
+  );
+  const end = vi.spyOn(hostControl, "endSession").mockImplementation(async () => {
+    running = false;
+  });
+  try {
+    const { queryClient } = renderWithProviders(
+      <>
+        <PrivateSessionTabs
+          sessions={[session]}
+          hostId={host.id}
+          currentId={session.id}
+        />
+        <SessionList />
+      </>,
+    );
+    const name = /Fresh conversation/;
+    expect(await screen.findByRole("link", { name })).toHaveAttribute(
+      "href",
+      `/private/${session.id}?fullscreen=1&host=${host.id}`,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "End Fresh conversation" }),
+    );
+    expect(end).toHaveBeenCalledWith(session.id, host.id);
+    await waitFor(() => {
+      expect(queryClient.isFetching({ queryKey: ["private", host.id] })).toBe(0);
+      expect(screen.getByRole("link", { name })).toHaveAttribute(
+        "href",
+        `/private/${session.id}?host=${host.id}`,
+      );
+    });
+  } finally {
+    end.mockRestore();
+  }
 });
 
 it("does not read private content or start a passkey prompt before the user unlocks", async () => {
