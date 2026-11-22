@@ -83,6 +83,9 @@ export function HostSetup({ active = true }: { active?: boolean }) {
   const [unlocking, setUnlocking] = React.useState(false);
   const unlockAttempt = React.useRef(0);
   const [copyStatus, setCopyStatus] = React.useState<string | null>(null);
+  const [installCopy, setInstallCopy] = React.useState<
+    "copied" | "failed" | null
+  >(null);
   const online = useQuery({
     queryKey: ["host-setup-status", host?.id, mode],
     queryFn: () => hostOnline(host!.id),
@@ -233,6 +236,15 @@ export function HostSetup({ active = true }: { active?: boolean }) {
       setCopyStatus("Could not copy. Select and copy the text directly.");
     }
   };
+  const installCommand = `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; trap cleanup EXIT; curl -fsSL --proto =https https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh -o "$f" && bash "$f"'`;
+  const copyInstall = async () => {
+    try {
+      await navigator.clipboard.writeText(installCommand);
+      setInstallCopy("copied");
+    } catch {
+      setInstallCopy("failed");
+    }
+  };
   const machineStatus = !host
     ? "Not connected"
     : !isPinned(host)
@@ -327,8 +339,7 @@ export function HostSetup({ active = true }: { active?: boolean }) {
             Install the conversations CLI on that machine
           </p>
           <p className="text-muted-foreground">
-            Download the archive for your platform, then run{" "}
-            <code>conversations host</code>.
+            Install the CLI, then run <code>conversations host</code>.
           </p>
           <div className="flex flex-wrap gap-2">
             <a
@@ -339,15 +350,27 @@ export function HostSetup({ active = true }: { active?: boolean }) {
             >
               Download Conversations
             </a>
-            <a
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              href="https://github.com/SjuulArtreides/conversations/blob/main/scripts/install.sh"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void copyInstall()}
             >
               Install with Bash
-            </a>
+            </Button>
           </div>
+          {installCopy === "copied" && (
+            <p role="status" className="text-xs">
+              Install command copied to the clipboard.
+            </p>
+          )}
+          {installCopy === "failed" && (
+            <div role="status" className="space-y-1 text-xs">
+              <p>Could not copy. Select and copy the command below.</p>
+              <code className="block break-all select-all font-mono">
+                {installCommand}
+              </code>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             Or{" "}
             <a

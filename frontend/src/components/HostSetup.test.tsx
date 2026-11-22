@@ -125,12 +125,9 @@ it("offers a latest CLI download link only when no machine is paired", async () 
     "https://github.com/SjuulArtreides/conversations/releases/latest",
   );
   expect(link).toHaveAttribute("rel", "noopener noreferrer");
-  const bash = screen.getByRole("link", { name: "Install with Bash" });
-  expect(bash).toHaveAttribute(
-    "href",
-    "https://github.com/SjuulArtreides/conversations/blob/main/scripts/install.sh",
-  );
-  expect(bash).toHaveAttribute("rel", "noopener noreferrer");
+  expect(
+    screen.getByRole("button", { name: "Install with Bash" }),
+  ).toBeVisible();
   expect(
     screen.getByRole("link", { name: "build from source" }),
   ).toHaveAttribute(
@@ -146,7 +143,44 @@ it("offers a latest CLI download link only when no machine is paired", async () 
   expect(
     screen.queryByRole("link", { name: "Download Conversations" }),
   ).toBeNull();
-  expect(screen.queryByRole("link", { name: "Install with Bash" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Install with Bash" }),
+  ).toBeNull();
+});
+
+const installCommand =
+  `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; ` +
+  `trap cleanup EXIT; ` +
+  `curl -fsSL --proto =https https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh ` +
+  `-o "$f" && bash "$f"'`;
+
+it("copies the exact bash installer one-liner when Install with Bash is clicked", async () => {
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  renderWithProviders(<HostSetup />);
+  await user.click(screen.getByRole("button", { name: "Install with Bash" }));
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith(installCommand);
+  expect(installCommand).not.toMatch(/curl[^|]*\|\s*bash/);
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "Install command copied to the clipboard.",
+  );
+});
+
+it("shows the selectable installer command when clipboard copy fails", async () => {
+  vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
+    new Error("denied"),
+  );
+  const user = userEvent.setup();
+  renderWithProviders(<HostSetup />);
+  await user.click(screen.getByRole("button", { name: "Install with Bash" }));
+  const fallback = await screen.findByRole("status");
+  expect(fallback).toHaveTextContent("Could not copy");
+  const command = within(fallback).getByText(/^bash -c /);
+  expect(command.textContent).toBe(installCommand);
+  expect(command).toHaveClass("select-all");
 });
 
 it("distinguishes a pending connection probe from an offline machine", async () => {
