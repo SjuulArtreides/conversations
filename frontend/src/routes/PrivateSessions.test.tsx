@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { usePairedHosts } from "@/lib/hostPairing";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import type {
   ChannelResult,
@@ -1090,6 +1090,43 @@ describe("private terminal", () => {
     expect(
       screen.queryByRole("link", { name: "acme/private-shell#23" }),
     ).toBeNull();
+  });
+});
+
+describe("new session hand-off", () => {
+  function LocationProbe() {
+    const location = useLocation();
+    return (
+      <output data-testid="location">
+        {JSON.stringify({ search: location.search, state: location.state })}
+      </output>
+    );
+  }
+
+  it("keeps the new-session fit request when it adds the host to the address", async () => {
+    sessionRunning = true;
+    renderWithProviders(
+      <>
+        <LocationProbe />
+        <Routes>
+          <Route path="/private/:id" element={<PrivateSessionView />} />
+        </Routes>
+      </>,
+      {
+        route: {
+          pathname: `/private/${SESSION}`,
+          state: { fitNewSession: SESSION },
+        },
+      },
+    );
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("location").textContent ?? "{}"),
+      ).toEqual({
+        search: `?host=${HOST}`,
+        state: { fitNewSession: SESSION },
+      }),
+    );
   });
 });
 
