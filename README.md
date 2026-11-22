@@ -86,6 +86,25 @@ install -m 0755 conversations "$HOME/.local/bin/conversations"
 
 Make sure `$HOME/.local/bin` is on your `PATH`. The sidecar uses
 `shasum -a 256` output that both `sha256sum -c` and `shasum -a 256 -c` accept.
+
+For a one-shot install on Linux or macOS (Apple Silicon or Intel), download
+`scripts/install.sh` first so you can review it, then run it with `bash`:
+
+```sh
+curl -fLO https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh
+bash install.sh                 # latest release
+# bash install.sh v0.69.1       # a specific vX.Y.Z tag
+# INSTALL_DIR=/usr/local/bin bash install.sh
+```
+
+The script picks the archive for your platform (with Rosetta detection on
+Apple Silicon), resolves the latest tag by following the public
+`/releases/latest` redirect, verifies the `.sha256` sidecar before extracting,
+checks `--version` on the staged binary, and only then replaces the installed
+copy — so a failed download never clobbers a working binary. It does not strip
+the macOS quarantine attribute; remove it deliberately after reviewing the
+download if Gatekeeper blocks the binary.
+
 Supported targets:
 
 | Platform | Target triple |

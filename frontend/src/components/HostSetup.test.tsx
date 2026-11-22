@@ -125,6 +125,12 @@ it("offers a latest CLI download link only when no machine is paired", async () 
     "https://github.com/SjuulArtreides/conversations/releases/latest",
   );
   expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  const bash = screen.getByRole("link", { name: "Install with Bash" });
+  expect(bash).toHaveAttribute(
+    "href",
+    "https://github.com/SjuulArtreides/conversations/blob/main/scripts/install.sh",
+  );
+  expect(bash).toHaveAttribute("rel", "noopener noreferrer");
   expect(
     screen.getByRole("link", { name: "build from source" }),
   ).toHaveAttribute(
@@ -140,6 +146,7 @@ it("offers a latest CLI download link only when no machine is paired", async () 
   expect(
     screen.queryByRole("link", { name: "Download Conversations" }),
   ).toBeNull();
+  expect(screen.queryByRole("link", { name: "Install with Bash" })).toBeNull();
 });
 
 it("distinguishes a pending connection probe from an offline machine", async () => {

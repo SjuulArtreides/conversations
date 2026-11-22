@@ -330,7 +330,7 @@ export function HostSetup({ active = true }: { active?: boolean }) {
             Download the archive for your platform, then run{" "}
             <code>conversations host</code>.
           </p>
-          <div>
+          <div className="flex flex-wrap gap-2">
             <a
               className={buttonVariants({ variant: "outline", size: "sm" })}
               href="https://github.com/SjuulArtreides/conversations/releases/latest"
@@ -338,6 +338,14 @@ export function HostSetup({ active = true }: { active?: boolean }) {
               rel="noopener noreferrer"
             >
               Download Conversations
+            </a>
+            <a
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              href="https://github.com/SjuulArtreides/conversations/blob/main/scripts/install.sh"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install with Bash
             </a>
           </div>
           <p className="text-xs text-muted-foreground">
