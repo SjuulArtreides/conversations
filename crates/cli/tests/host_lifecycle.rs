@@ -920,13 +920,25 @@ fn an_occupied_web_port_neither_blocks_host_startup_nor_is_taken_over() {
     // Something else owns the configured port before the host starts.
     let foreign = TcpListener::bind(("127.0.0.1", port)).unwrap();
     std::thread::spawn(move || {
-        for stream in foreign.incoming().flatten() {
+        for mut stream in foreign.incoming().flatten() {
+            // Consume the request head before answering: closing a socket
+            // with unread input makes the kernel send RST instead of FIN,
+            // and the probe's `read_to_end` then fails even though this
+            // service is alive and answered.
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut head = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
             let body = "FOREIGN SERVICE 3f9c2e7d11a4b";
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
-            let mut stream = stream;
             let _ = stream.write_all(response.as_bytes());
         }
     });
