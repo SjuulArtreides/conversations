@@ -62,7 +62,27 @@ function Step({
   );
 }
 
-export function HostSetup({ active = true }: { active?: boolean }) {
+const INSTALL_SCRIPT_URL =
+  "https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh";
+
+// Exactly what `scripts/install.sh --server` accepts: a browser-canonical
+// origin (http(s), lowercase DNS name, IPv4 or bracketed IPv6, optional
+// port). Every character it allows is inert in POSIX shells.
+const CANONICAL_ORIGIN =
+  /^https?:\/\/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?$/;
+
+function canonicalWebOrigin(origin: string): string | null {
+  return CANONICAL_ORIGIN.test(origin) ? origin : null;
+}
+
+export function HostSetup({
+  active = true,
+  webOrigin = window.location.origin,
+}: {
+  active?: boolean;
+  /** The server's web origin; defaults to this page's. */
+  webOrigin?: string;
+}) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const pairing = usePairedHosts();
@@ -236,7 +256,17 @@ export function HostSetup({ active = true }: { active?: boolean }) {
       setCopyStatus("Could not copy. Select and copy the text directly.");
     }
   };
-  const installCommand = `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; trap cleanup EXIT; curl -fsSL --proto =https https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh -o "$f" && bash "$f"'`;
+  const origin = canonicalWebOrigin(webOrigin);
+  // The origin travels as a positional parameter of the `bash -c` wrapper,
+  // never spliced into the script text, and is single-quoted even though a
+  // canonical origin holds no shell-active characters.
+  const installCommand = origin
+    ? `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; trap cleanup EXIT; curl -fsSL --proto =https ${INSTALL_SCRIPT_URL} -o "$f" && bash "$f" --server "$1"' bash '${origin}'`
+    : `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; trap cleanup EXIT; curl -fsSL --proto =https ${INSTALL_SCRIPT_URL} -o "$f" && bash "$f"'`;
+  const loginCommand = origin
+    ? `conversations login --server '${origin}'`
+    : null;
+  const hostCommand = origin ? `conversations host --server '${origin}'` : null;
   const copyInstall = async () => {
     try {
       await navigator.clipboard.writeText(installCommand);
@@ -331,94 +361,153 @@ export function HostSetup({ active = true }: { active?: boolean }) {
         />
       </ol>
       {!host && (
-        <div
-          aria-labelledby="host-cli-download-heading"
-          className="space-y-2 rounded-lg border border-border/70 p-4 text-sm"
+        <ol
+          aria-label="Connect a machine"
+          className="list-decimal space-y-4 pl-5 text-sm"
         >
-          <p id="host-cli-download-heading" className="font-medium">
-            Install the conversations CLI on that machine
-          </p>
-          <p className="text-muted-foreground">
-            Install the CLI, then run <code>conversations host</code>.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <a
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              href="https://github.com/SjuulArtreides/conversations/releases/latest"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Download Conversations
-            </a>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void copyInstall()}
-            >
-              Install with Bash
-            </Button>
-          </div>
-          {installCopy === "copied" && (
-            <p role="status" className="text-xs">
-              Install command copied to the clipboard.
+          <li aria-labelledby="host-cli-download-heading" className="space-y-2">
+            <p id="host-cli-download-heading" className="font-medium">
+              Install the conversations CLI on that machine
             </p>
-          )}
-          {installCopy === "failed" && (
-            <div role="status" className="space-y-1 text-xs">
-              <p>Could not copy. Select and copy the command below.</p>
-              <code className="block break-all select-all font-mono">
-                {installCommand}
-              </code>
+            <p className="text-muted-foreground">
+              Skip this if it is already installed. The Bash installer ends by
+              printing the exact login command for this server.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <a
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+                href="https://github.com/SjuulArtreides/conversations/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Download Conversations
+              </a>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyInstall()}
+              >
+                Install with Bash
+              </Button>
             </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Or{" "}
-            <a
-              className="underline"
-              href="https://github.com/SjuulArtreides/conversations#run-from-source"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              build from source
-            </a>
-            .
-          </p>
-        </div>
-      )}
-      {!host && (
-        <form onSubmit={(event) => void connect(event)} className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            On the machine where your agents run, start{" "}
-            <code>conversations host</code>. Copy its public
-            descriptor with{" "}
-            <code>conversations credential descriptor</code>.
-          </p>
-          <label className="block text-sm">
-            Host descriptor
-            <Input
-              value={descriptor}
-              onChange={(event) => setDescriptor(event.target.value)}
-              placeholder="chd1.…"
-              className="font-mono text-xs"
-            />
-          </label>
-          <label className="block text-sm">
-            Machine name
-            <Input
-              value={machineName}
-              onChange={(event) => setMachineName(event.target.value)}
-              placeholder="My laptop or Coder"
-            />
-          </label>
-          <Button type="submit" disabled={!descriptor.trim()}>
-            Connect machine
-          </Button>
-          {pairingError && (
-            <p role="alert" className="text-sm text-destructive">
-              {pairingError}
+            {installCopy === "copied" && (
+              <p role="status" className="text-xs">
+                Install command copied to the clipboard.
+              </p>
+            )}
+            {installCopy === "failed" && (
+              <div role="status" className="space-y-1 text-xs">
+                <p>Could not copy. Select and copy the command below.</p>
+                <code className="block break-all select-all font-mono">
+                  {installCommand}
+                </code>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Or{" "}
+              <a
+                className="underline"
+                href="https://github.com/SjuulArtreides/conversations#run-from-source"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                build from source
+              </a>
+              .
             </p>
-          )}
-        </form>
+          </li>
+          <li className="space-y-1">
+            <p className="font-medium">
+              Log in to this server and start the host
+            </p>
+            {loginCommand ? (
+              <>
+                <p className="text-muted-foreground">
+                  On that machine, log in to this server. Login offers to start
+                  the host; keep it running.
+                </p>
+                <code
+                  aria-label="Login command"
+                  className="block break-all select-all rounded bg-muted p-2 font-mono text-xs"
+                >
+                  {loginCommand}
+                </code>
+                <p className="text-muted-foreground">
+                  Already logged in to this server, or it does not require
+                  login? Start the host directly:
+                </p>
+                <code
+                  aria-label="Host command"
+                  className="block break-all select-all rounded bg-muted p-2 font-mono text-xs"
+                >
+                  {hostCommand}
+                </code>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                On that machine, run{" "}
+                <code>conversations login --server &lt;URL&gt;</code> with this
+                server&apos;s web address, then keep the host running. Without{" "}
+                <code>--server</code> the CLI uses http://localhost:8080.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              If <code>conversations</code> is not on your PATH, use the full
+              path the installer printed.
+            </p>
+          </li>
+          <li className="space-y-1">
+            <p className="font-medium">Copy the public host descriptor</p>
+            <p className="text-muted-foreground">
+              In another terminal on that machine, run the descriptor command
+              that <code>conversations host</code> printed at startup:
+              <code className="mt-1 block break-all">
+                conversations credential --runtime-dir … descriptor
+              </code>
+              It prints a public descriptor starting with <code>chd1.</code>.
+            </p>
+          </li>
+          <li>
+            <form
+              onSubmit={(event) => void connect(event)}
+              className="space-y-3"
+            >
+              <p className="font-medium">Paste it here and connect</p>
+              <label className="block text-sm">
+                Host descriptor
+                <Input
+                  value={descriptor}
+                  onChange={(event) => setDescriptor(event.target.value)}
+                  placeholder="chd1.…"
+                  className="font-mono text-xs"
+                />
+              </label>
+              <label className="block text-sm">
+                Machine name
+                <Input
+                  value={machineName}
+                  onChange={(event) => setMachineName(event.target.value)}
+                  placeholder="My laptop or Coder"
+                />
+              </label>
+              <Button type="submit" disabled={!descriptor.trim()}>
+                Connect machine
+              </Button>
+              {pairingError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {pairingError}
+                </p>
+              )}
+            </form>
+          </li>
+          <li className="space-y-1">
+            <p className="font-medium">Prepare and approve this browser</p>
+            <p className="text-muted-foreground">
+              After connecting, this page asks you to prepare this browser, then
+              shows how to approve it on that machine.
+            </p>
+          </li>
+        </ol>
       )}
       {host && !isPinned(host) && (
         <p role="alert" className="text-sm text-destructive">
@@ -428,9 +517,9 @@ export function HostSetup({ active = true }: { active?: boolean }) {
       )}
       {offline && (
         <p role="status" className="text-sm">
-          Start <code>conversations host</code> on{" "}
-          <strong>{host!.label}</strong>. This page checks automatically while
-          open.
+          Next: start <code>conversations host</code> on{" "}
+          <strong>{host!.label}</strong> and keep it running. This page checks
+          automatically while open.
         </p>
       )}
       {checking && (
@@ -460,10 +549,11 @@ export function HostSetup({ active = true }: { active?: boolean }) {
           </label>
           {approvalNeeded && !waiting && (
             <>
-              <p className="text-sm text-muted-foreground">
-                Prepare this browser’s public key so the owner of{" "}
-                <strong>{host!.label}</strong> can compare and approve it
-                locally.
+              <p className="text-sm">
+                <strong>Next: prepare this browser for approval.</strong> This
+                shares only this browser’s public key so the owner of{" "}
+                <strong>{host!.label}</strong> can compare and approve it on
+                that machine. It does not grant access by itself.
               </p>
               <Button
                 disabled={
@@ -523,19 +613,11 @@ export function HostSetup({ active = true }: { active?: boolean }) {
               <p role="status">
                 Waiting for browser approval on <strong>{host!.label}</strong>.
               </p>
+              <p className="font-medium">
+                Next: approve this browser on {host!.label}.
+              </p>
               <p>Publication does not notify this machine or grant access.</p>
-              <ol className="list-decimal space-y-2 pl-5">
-                <li>
-                  On <strong>{host!.label}</strong>, open its local host page.
-                  Under <strong>Access to this host</strong>, choose{" "}
-                  <strong>Add person</strong> and find this browser.
-                </li>
-                <li>
-                  Compare this fingerprint. Allow reading history, starting
-                  sessions and controlling running terminals, then choose{" "}
-                  <strong>Trust public key</strong>.
-                </li>
-              </ol>
+              <p>First compare this browser’s fingerprint:</p>
               <code className="block break-all select-all text-xs">
                 {publication.key.data.kid}
               </code>
@@ -546,14 +628,17 @@ export function HostSetup({ active = true }: { active?: boolean }) {
               >
                 Copy fingerprint
               </Button>
-              <details className="space-y-2">
-                <summary className="cursor-pointer font-medium">
+              <section
+                aria-labelledby="terminal-approval-heading"
+                className="space-y-2"
+              >
+                <h3 id="terminal-approval-heading" className="font-medium">
                   Terminal approval instructions
-                </summary>
+                </h3>
                 <p>
-                  On {host!.label}, compare the fingerprint first, then run this
-                  command to approve this browser with the standard owner
-                  permissions.
+                  Use this for a remote machine such as Coder. In a terminal
+                  on {host!.label}, run this command to approve this browser
+                  with the standard owner permissions.
                 </p>
                 <code className="block break-all select-all text-xs">
                   {approvalCommand}
@@ -565,7 +650,31 @@ export function HostSetup({ active = true }: { active?: boolean }) {
                 >
                   Copy approval command
                 </Button>
-              </details>
+              </section>
+              <section
+                aria-labelledby="local-approval-heading"
+                className="space-y-2"
+              >
+                <h3 id="local-approval-heading" className="font-medium">
+                  Or approve on the local host page
+                </h3>
+                <p>
+                  Only from a browser running on {host!.label} itself: its local
+                  host page is served on that machine’s <code>localhost</code>,
+                  so it does not open from another computer.
+                </p>
+                <ol className="list-decimal space-y-2 pl-5">
+                  <li>
+                    Under <strong>Access to this host</strong>, choose{" "}
+                    <strong>Add person</strong> and find this browser.
+                  </li>
+                  <li>
+                    Compare the fingerprint. Allow reading history, starting
+                    sessions and controlling running terminals, then choose{" "}
+                    <strong>Trust public key</strong>.
+                  </li>
+                </ol>
+              </section>
               {copyStatus && <p role="status">{copyStatus}</p>}
               <p>This page detects approval automatically while open.</p>
             </div>

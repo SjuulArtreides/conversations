@@ -148,18 +148,75 @@ it("offers a latest CLI download link only when no machine is paired", async () 
   ).toBeNull();
 });
 
-const installCommand =
+it("walks a new user from install through start, descriptor, connect and approval", () => {
+  renderWithProviders(<HostSetup />);
+  const steps = within(
+    screen.getByRole("list", { name: "Connect a machine" }),
+  ).getAllByRole("listitem");
+  expect(steps.map((step) => step.querySelector("p")?.textContent)).toEqual([
+    "Install the conversations CLI on that machine",
+    "Log in to this server and start the host",
+    "Copy the public host descriptor",
+    "Paste it here and connect",
+    "Prepare and approve this browser",
+  ]);
+  expect(steps[1]).toHaveTextContent(
+    `conversations login --server '${window.location.origin}'`,
+  );
+  expect(steps[1]).toHaveTextContent(
+    `conversations host --server '${window.location.origin}'`,
+  );
+  expect(steps[2]).toHaveTextContent(
+    "conversations credential --runtime-dir … descriptor",
+  );
+  expect(
+    within(steps[3]).getByRole("textbox", { name: "Host descriptor" }),
+  ).toBeVisible();
+  expect(
+    within(steps[3]).getByRole("button", { name: "Connect machine" }),
+  ).toBeDisabled();
+});
+
+it("leads waiting approval with the next action and terminal approval for remote machines", async () => {
+  await connect();
+  mocks.registration = true;
+  renderWithProviders(<HostSetup />);
+  expect(
+    await screen.findByText("Next: approve this browser on Coder."),
+  ).toBeVisible();
+  const terminal = screen.getByRole("region", {
+    name: "Terminal approval instructions",
+  });
+  expect(
+    within(terminal).getByText(/^conversations credential add/),
+  ).toBeVisible();
+  expect(
+    within(terminal).getByRole("button", { name: "Copy approval command" }),
+  ).toBeVisible();
+  const local = screen.getByRole("region", {
+    name: "Or approve on the local host page",
+  });
+  expect(local).toHaveTextContent("localhost");
+  expect(local).toHaveTextContent("Trust public key");
+  expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+const site = "https://conversations.example.com";
+const installPrefix =
   `bash -c 'f=$(mktemp) || exit; cleanup() { rm -f -- "$f"; }; ` +
   `trap cleanup EXIT; ` +
   `curl -fsSL --proto =https https://raw.githubusercontent.com/SjuulArtreides/conversations/main/scripts/install.sh ` +
-  `-o "$f" && bash "$f"'`;
+  `-o "$f" && bash "$f"`;
+const installCommand = `${installPrefix} --server "$1"' bash '${site}'`;
+const genericInstallCommand = `${installPrefix}'`;
 
-it("copies the exact bash installer one-liner when Install with Bash is clicked", async () => {
+it("copies the exact bash installer one-liner, passing this site's origin as a positional parameter", async () => {
   const writeText = vi
     .spyOn(navigator.clipboard, "writeText")
     .mockResolvedValue(undefined);
   const user = userEvent.setup();
-  renderWithProviders(<HostSetup />);
+  renderWithProviders(<HostSetup webOrigin={site} />);
   await user.click(screen.getByRole("button", { name: "Install with Bash" }));
   expect(writeText).toHaveBeenCalledTimes(1);
   expect(writeText).toHaveBeenCalledWith(installCommand);
@@ -169,12 +226,65 @@ it("copies the exact bash installer one-liner when Install with Bash is clicked"
   );
 });
 
+it("uses this page's origin by default", async () => {
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  renderWithProviders(<HostSetup />);
+  await user.click(screen.getByRole("button", { name: "Install with Bash" }));
+  expect(writeText).toHaveBeenCalledWith(
+    `${installPrefix} --server "$1"' bash '${window.location.origin}'`,
+  );
+  expect(screen.getByLabelText("Login command")).toHaveTextContent(
+    `conversations login --server '${window.location.origin}'`,
+  );
+});
+
+it("shows exact same-server login and host commands for manual installs", () => {
+  renderWithProviders(<HostSetup webOrigin={site} />);
+  expect(screen.getByLabelText("Login command").textContent).toBe(
+    `conversations login --server '${site}'`,
+  );
+  expect(screen.getByLabelText("Host command").textContent).toBe(
+    `conversations host --server '${site}'`,
+  );
+  expect(screen.getByLabelText("Login command")).toHaveClass("select-all");
+});
+
+it.each([
+  "null",
+  "https://Conversations.example.com",
+  "https://conversations.example.com/app",
+  "https://x.example'; touch pwned; '",
+  "https://x.example$(id)",
+  "file://",
+])(
+  "never embeds a non-canonical origin (%s) in a shell command",
+  async (webOrigin) => {
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderWithProviders(<HostSetup webOrigin={webOrigin} />);
+    await user.click(
+      screen.getByRole("button", { name: "Install with Bash" }),
+    );
+    expect(writeText).toHaveBeenCalledWith(genericInstallCommand);
+    expect(screen.queryByLabelText("Login command")).toBeNull();
+    expect(screen.queryByLabelText("Host command")).toBeNull();
+    expect(
+      screen.getByText(/conversations login --server <URL>/),
+    ).toBeVisible();
+  },
+);
+
 it("shows the selectable installer command when clipboard copy fails", async () => {
   vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
     new Error("denied"),
   );
   const user = userEvent.setup();
-  renderWithProviders(<HostSetup />);
+  renderWithProviders(<HostSetup webOrigin={site} />);
   await user.click(screen.getByRole("button", { name: "Install with Bash" }));
   const fallback = await screen.findByRole("status");
   expect(fallback).toHaveTextContent("Could not copy");
@@ -250,9 +360,9 @@ it("updates a waiting browser name explicitly and gives a copyable owner approva
   await user.click(screen.getByRole("button", { name: "Update browser name" }));
   expect(await screen.findByText("Browser name updated.")).toBeVisible();
   expect(mocks.publish).toHaveBeenLastCalledWith("Work's $(echo never)");
-  await user.click(
-    screen.getByText("Terminal approval instructions", { selector: "summary" }),
-  );
+  expect(
+    screen.getByRole("region", { name: "Terminal approval instructions" }),
+  ).toHaveTextContent("remote machine such as Coder");
   const command = screen.getByText(
     /^conversations credential add/,
   ).textContent!;
