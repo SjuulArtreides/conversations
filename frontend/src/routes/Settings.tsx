@@ -308,8 +308,11 @@ export function Settings() {
 
   // The launch flags are the HOST's own (host-signed answer, local file). There
   // is no fallback to a central copy: without a paired, authorized host they
-  // cannot be read or changed, and the card says so.
+  // cannot be read or changed, and the card says so. A remote read opens a
+  // private-channel handshake, so it waits until the Launch section is shown
+  // instead of competing with Host access onboarding.
   const hostQuery = useQuery({
+    enabled: host.local || activeSection === "launch",
     queryKey: launchQueryKey,
     queryFn: () =>
       launchHostId

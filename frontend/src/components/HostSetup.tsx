@@ -71,6 +71,9 @@ const INSTALL_SCRIPT_URL =
 const CANONICAL_ORIGIN =
   /^https?:\/\/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?$/;
 
+const IDENTITY_DENIED =
+  /unknown, revoked or expired credential or delegation|does not have an approved owner credential|(?:credential|browser key|key) (?:is |was )?(?:unknown|revoked|expired|not approved)/i;
+
 function canonicalWebOrigin(origin: string): string | null {
   return CANONICAL_ORIGIN.test(origin) ? origin : null;
 }
@@ -106,6 +109,17 @@ export function HostSetup({
   const [installCopy, setInstallCopy] = React.useState<
     "copied" | "failed" | null
   >(null);
+  const identity = `${host?.id ?? ""}:${mode}`;
+  // Once the machine has confirmed this browser key is not approved, further
+  // access handshakes cannot succeed until its owner acts, and each one holds
+  // a private connection on the machine. Stop automatic access checks for
+  // this host and mode until the user explicitly asks to check again.
+  const [pausedIdentity, setPausedIdentity] = React.useState<string | null>(
+    null,
+  );
+  const [pairingMachine, setPairingMachine] = React.useState(false);
+  const awaitingApproval = pausedIdentity === identity;
+  const [rechecking, setRechecking] = React.useState(false);
   const online = useQuery({
     queryKey: ["host-setup-status", host?.id, mode],
     queryFn: () => hostOnline(host!.id),
@@ -114,22 +128,28 @@ export function HostSetup({
     retry: false,
     gcTime: 0,
   });
+  const accessPolling =
+    polling &&
+    online.isSuccess &&
+    online.data === true &&
+    !awaitingApproval &&
+    !pairingMachine;
   const access = useQuery({
     queryKey: ["host-setup-access", host?.id, mode],
     queryFn: () => inspectHostAccess(host!.id),
-    enabled: polling && online.isSuccess && online.data === true,
-    refetchInterval:
-      polling && online.isSuccess && online.data === true ? 5000 : false,
+    enabled: accessPolling,
+    refetchInterval: accessPolling ? 5000 : false,
     retry: false,
     gcTime: 0,
   });
   const accessCode =
     access.error instanceof HostControlError ? access.error.code : null;
   const connected =
-    online.isSuccess && online.data === true && accessCode !== "offline";
+    online.isSuccess &&
+    online.data === true &&
+    (awaitingApproval || accessCode !== "offline");
   const verified = connected && access.isSuccess;
   const ready = verified && access.data.canRead && access.data.canStart;
-  const identity = `${host?.id ?? ""}:${mode}`;
   const previous = React.useRef({ identity: "", ready: false });
   React.useEffect(() => {
     if (
@@ -153,13 +173,17 @@ export function HostSetup({
   const connect = async (event: React.FormEvent) => {
     event.preventDefault();
     setPairingError(null);
+    setPairingMachine(true);
     try {
       closePrivateChannels();
-      await pairHost(descriptor, machineName, "browser-key");
+      const paired = await pairHost(descriptor, machineName, "browser-key");
+      setPausedIdentity(`${paired.id}:browser-key`);
       setDescriptor("");
       setMachineName("");
     } catch (error) {
       setPairingError((error as Error).message);
+    } finally {
+      setPairingMachine(false);
     }
   };
   const publishBrowser = (updating = false) => {
@@ -203,10 +227,11 @@ export function HostSetup({
   const checking =
     !!host &&
     isPinned(host) &&
-    (online.isPending || (connected && access.isPending));
+    (online.isPending || (connected && access.isPending && !awaitingApproval));
   const offline =
     !!host &&
-    ((online.isSuccess && online.data === false) || accessCode === "offline");
+    ((online.isSuccess && online.data === false) ||
+      (!awaitingApproval && accessCode === "offline"));
   const refusal = accessCode === "refused" ? (access.error?.message ?? "") : "";
   // The regular access poll retries temporary connection capacity refusals.
   const hostBusy =
@@ -214,12 +239,34 @@ export function HostSetup({
     /too many private connection requests are open|too many private connections are open/.test(
       refusal,
     );
-  const identityDenied =
-    /unknown, revoked or expired credential or delegation|does not have an approved owner credential|(?:credential|browser key|key) (?:is |was )?(?:unknown|revoked|expired|not approved)/i.test(
-      refusal,
-    );
+  const identityDenied = IDENTITY_DENIED.test(refusal);
   const approvalNeeded =
-    connected && access.isError && (accessCode === "locked" || identityDenied);
+    connected &&
+    (awaitingApproval ||
+      (access.isError && (accessCode === "locked" || identityDenied)));
+  // Passkey mode recovers through its own unlock flow, so only browser-key
+  // approval pauses the access handshake.
+  const keyNotApproved =
+    mode === "browser-key" && connected && access.isError && identityDenied;
+  React.useEffect(() => {
+    if (keyNotApproved) setPausedIdentity(identity);
+  }, [keyNotApproved, access.errorUpdatedAt, identity]);
+  const recheckAttempt = React.useRef(0);
+  React.useEffect(() => {
+    recheckAttempt.current += 1;
+    setRechecking(false);
+  }, [identity]);
+  const checkApproval = async () => {
+    const attempt = ++recheckAttempt.current;
+    const checked = identity;
+    setRechecking(true);
+    const result = await access.refetch();
+    if (attempt !== recheckAttempt.current) return;
+    setRechecking(false);
+    if (result.isSuccess) {
+      setPausedIdentity((paused) => (paused === checked ? null : paused));
+    }
+  };
   const refusalReview =
     connected && accessCode === "refused" && !identityDenied && !hostBusy;
   const insufficientPermissions =
@@ -583,6 +630,16 @@ export function HostSetup({
               </Button>
             </>
           )}
+          {awaitingApproval && !waiting && approvalNeeded && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rechecking}
+              onClick={() => void checkApproval()}
+            >
+              Check browser approval
+            </Button>
+          )}
           {publication.registration.data === true &&
             browserName !== publishedName && (
               <Button
@@ -688,7 +745,25 @@ export function HostSetup({
                 </ol>
               </section>
               {copyStatus && <p role="status">{copyStatus}</p>}
-              <p>This page detects approval automatically while open.</p>
+              {awaitingApproval ? (
+                <div className="space-y-2">
+                  <p>
+                    After approving this browser on {host!.label}, check
+                    again here.
+                  </p>
+                  <Button
+                    size="sm"
+                    disabled={rechecking}
+                    onClick={() => void checkApproval()}
+                  >
+                    {rechecking
+                      ? "Checking browser approval…"
+                      : "Check browser approval"}
+                  </Button>
+                </div>
+              ) : (
+                <p>This page detects approval automatically while open.</p>
+              )}
             </div>
           )}
         </div>
@@ -714,6 +789,15 @@ export function HostSetup({
           check again automatically.
         </p>
       )}
+      {awaitingApproval &&
+        access.isError &&
+        !identityDenied &&
+        !hostBusy &&
+        !refusalReview && (
+          <p role="status" className="text-sm">
+            The approval check could not finish. {access.error.message}
+          </p>
+        )}
       {refusalReview && (
         <div role="alert" className="space-y-2 text-sm text-destructive">
           <p>
