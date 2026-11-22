@@ -74,17 +74,41 @@ curl -fL --proto '=https' --tlsv1.2 \
   -o "$tmp/$archive.sha256" "$base/$archive.sha256" \
   || err "failed to download $archive for $TAG"
 
-# Verify the checksum before extracting. The sidecar is `shasum -a 256` output
-# ('<hash>  <file>'), which both sha256sum and shasum accept with -c.
+# Verify the checksum before extracting. sha256sum/shasum -c tolerates stray
+# lines in the sidecar (warns and still exits 0), so parse it ourselves: it
+# must be exactly one line with a 64-hex digest naming this archive.
 echo "Verifying checksum…"
-(
-  cd "$tmp"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "$archive.sha256"
-  else
-    shasum -a 256 -c "$archive.sha256"
-  fi >/dev/null
-) || err "checksum verification failed — refusing to extract"
+sidecar="$tmp/$archive.sha256"
+
+line_count=$(awk 'END { print NR }' "$sidecar")
+[ "$line_count" = "1" ] \
+  || err "checksum sidecar must contain exactly one line (got $line_count)"
+
+field_count=$(awk 'NR == 1 { print NF }' "$sidecar")
+[ "$field_count" = "2" ] \
+  || err "checksum sidecar line must have exactly two fields (got $field_count)"
+
+expected_hash=$(awk 'NR == 1 { print $1 }' "$sidecar")
+expected_name=$(awk 'NR == 1 { print $2 }' "$sidecar")
+expected_name="${expected_name#\*}"
+
+[ "$expected_name" = "$archive" ] \
+  || err "checksum sidecar names '$expected_name', expected '$archive'"
+
+hex_regex='^[0-9a-fA-F]{64}$'
+[[ "$expected_hash" =~ $hex_regex ]] \
+  || err "checksum sidecar digest is not a 64-char hex value"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_hash=$(sha256sum "$tmp/$archive" | awk '{print $1}')
+else
+  actual_hash=$(shasum -a 256 "$tmp/$archive" | awk '{print $1}')
+fi
+
+expected_lc=$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')
+actual_lc=$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')
+[ "$expected_lc" = "$actual_lc" ] \
+  || err "checksum verification failed — refusing to extract"
 
 tar -xzf "$tmp/$archive" -C "$tmp"
 [ -f "$tmp/$BIN" ] || err "archive did not contain $BIN"
@@ -93,8 +117,7 @@ chmod +x "$tmp/$BIN"
 # Check the staged binary before replacing any existing install. On Darwin
 # without a Developer ID signature, Gatekeeper may refuse to launch a freshly
 # downloaded binary; surface that here instead of clobbering the installed
-# copy. Quarantine attributes are left in place — remove them deliberately
-# after reviewing the download.
+# copy.
 "$tmp/$BIN" --version >/dev/null \
   || err "staged binary failed to execute — keeping the existing $INSTALL_DIR/$BIN"
 
