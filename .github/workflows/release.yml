@@ -1,5 +1,6 @@
 # CLI release build. Triggered by pushing a strict `vX.Y.Z` tag that matches
-# the `workspace.package.version` in `Cargo.toml`.
+# the `workspace.package.version` in `Cargo.toml`, or dispatched on such a tag
+# by tag-release.yml after a version bump lands on main with green CI.
 #
 # Each build job rebuilds the public conversations CLI natively on its target
 # runner, embeds the frontend the same way CI does (`npm ci && npm run build`
@@ -19,6 +20,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}

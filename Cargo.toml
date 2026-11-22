@@ -4,8 +4,8 @@ members = ["crates/core", "crates/server", "crates/cli"]
 exclude = ["vendor/vt100"]
 
 [workspace.package]
-# The initial public snapshot preserves the source application's version.
-version = "0.69.2"
+# Bumping this on main releases the CLI: see DEVELOPMENT.md#releases.
+version = "0.70.0"
 edition = "2021"
 license = "MIT"
 authors = ["Arrakis Engineering"]

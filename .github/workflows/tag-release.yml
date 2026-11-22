@@ -1,0 +1,91 @@
+# Automatic releases. When CI passes on a push to main and the workspace
+# version in Cargo.toml has no `v<version>` tag yet, tag that commit, give its
+# published server image the same version tag, and start the CLI release.
+#
+# A tag pushed with GITHUB_TOKEN does not trigger other workflows, so this job
+# dispatches release.yml on the new tag explicitly. Re-running it is safe: an
+# existing tag is left alone.
+name: Tag release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the workspace version
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+      packages: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE: ghcr.io/sjuulartreides/conversations
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Decide whether this commit releases
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Workspace version '$version' is not strict X.Y.Z"
+            exit 1
+          fi
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not on main"
+            exit 1
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag the server image
+        if: steps.meta.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create --tag "$IMAGE:$TAG" "$IMAGE:sha-$SHA"
+          printf 'Server image: %s:%s\n' "$IMAGE" "$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the release tag and start the CLI release
+        if: steps.meta.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Conversations $TAG" "$SHA"
+          git push origin "refs/tags/$TAG"
+          gh workflow run release.yml --ref "$TAG"
+          printf 'Release tag: %s at %s\n' "$TAG" "$SHA" >> "$GITHUB_STEP_SUMMARY"
