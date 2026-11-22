@@ -232,7 +232,7 @@ fn noninteractive_login_prints_a_pasteable_host_command_and_asks_nothing() {
         .envs(env.environment())
         .args(env.login_args());
     let output = owned_process::run(&mut command, b"", Duration::from_secs(30)).unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
     assert!(output.status.success(), "{output:?}");
     let url = &env.central.url;
     assert_eq!(
