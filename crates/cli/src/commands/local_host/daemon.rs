@@ -531,8 +531,11 @@ pub async fn run(
     if host.cookie.is_none() {
         eprintln!("No localhost login: terminal mirroring works; browser session creation requires login.");
     }
-    let exe = std::env::current_exe().ok();
-    eprintln!("{}", pairing_hint(&host.server, exe.as_deref(), dir));
+    match authz::attest::descriptor(dir) {
+        Ok(descriptor) => eprintln!("{}", pairing_hint(&host.server, &descriptor)),
+        // Pairing guidance is advisory; a missing descriptor must not stop the host.
+        Err(error) => eprintln!("Cannot generate the public host descriptor: {error:#}"),
+    }
     let mut jobs = tokio::task::JoinSet::new();
     jobs.spawn(host.availability.clone().monitor(host.server.clone()));
     jobs.spawn(codex_delivery_loop(host.clone()));
@@ -573,9 +576,14 @@ pub async fn run(
     }
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    // Registered now, so Ctrl-C relayed by an onboarding prompt stops the host.
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    // First interactive start without an approved browser: offer approval on
+    // a detached thread. The guard restores the terminal when the host stops.
+    let _terminal = super::onboarding::offer(dir, &host.server, host.cmux.is_some());
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => break,
+            _ = interrupt.recv() => break,
             _ = terminate.recv() => break,
             _ = hangup.recv() => break,
             connection = listener.accept() => {
@@ -602,21 +610,14 @@ pub async fn run(
     Ok(())
 }
 
-/// Startup guidance for pairing a browser with this host. It names the command
-/// that prints the public descriptor for exactly this runtime directory; it
-/// never prints the descriptor itself. The command uses this executable's
-/// absolute path, because the installer may leave `conversations` off PATH.
-fn pairing_hint(server: &str, exe: Option<&Path>, dir: &Path) -> String {
-    use super::cmux::shell_quote;
-    let program = exe.map_or("conversations".into(), |exe| {
-        shell_quote(&exe.to_string_lossy())
-    });
-    let dir = shell_quote(&dir.to_string_lossy());
+/// Startup guidance for pairing a browser with this host. It prints the same
+/// public descriptor as `credential descriptor` for this runtime directory.
+fn pairing_hint(server: &str, descriptor: &str) -> String {
     let server = server.trim_end_matches('/');
     format!(
-        "To use this host from a browser, pair the browser with it. Keep this host running and, in another terminal, run:\n  \
-         {program} credential --runtime-dir {dir} descriptor\n\
-         Then open Host access at {server}/settings, paste the public host descriptor, click Connect machine, and follow the browser approval prompt."
+        "To use this host from a browser, pair the browser with it. Keep this host running. Public host descriptor:\n  \
+         {descriptor}\n\
+         Open Host access at {server}/settings, paste the public host descriptor, click Connect machine, and follow the browser approval prompt."
     )
 }
 
@@ -4357,58 +4358,25 @@ mod tests {
     use conversations_core::{AgentKind, AgentLauncher};
 
     #[test]
-    fn pairing_hint_names_a_pasteable_descriptor_command_for_this_runtime() {
-        let exe = Path::new("/opt/my tools/it's/conversations");
-        let dir = Path::new("/home/a user/it's $HOME `x` \"q\"/host dir");
-        let hint = pairing_hint("https://conversations.example/", Some(exe), dir);
-        let line = hint
-            .lines()
-            .map(str::trim)
-            .find(|line| line.ends_with(" descriptor"))
-            .expect("descriptor command line");
-        // Pasted into a POSIX shell, the line must run this exact executable
-        // (PATH may lack `conversations`) with the exact runtime directory.
-        let argv = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("printf '%s\\0' {line}"))
-            .output()
-            .unwrap();
-        assert!(argv.status.success());
-        let argv: Vec<_> = argv
-            .stdout
-            .split(|byte| *byte == 0)
-            .filter(|arg| !arg.is_empty())
-            .map(|arg| String::from_utf8(arg.to_vec()).unwrap())
-            .collect();
-        assert_eq!(
-            argv,
-            [
-                exe.to_str().unwrap(),
-                "credential",
-                "--runtime-dir",
-                dir.to_str().unwrap(),
-                "descriptor"
-            ]
-        );
+    fn pairing_hint_displays_this_runtimes_public_descriptor() {
+        let temp = tempfile::tempdir().unwrap();
+        let descriptor = authz::attest::descriptor(&temp.path().join("runtime")).unwrap();
+        assert!(descriptor.starts_with("chd1."), "{descriptor}");
+        let hint = pairing_hint("https://conversations.example/", &descriptor);
         assert!(
-            pairing_hint("https://conversations.example", None, Path::new("/d"))
-                .contains("\n  conversations credential --runtime-dir '/d' descriptor\n"),
-            "falls back to `conversations` when the executable path is unknown"
+            hint.lines().any(|line| line.trim() == descriptor),
+            "the descriptor is displayed on its own line: {hint}"
         );
         assert!(hint.contains("pair the browser"), "{hint}");
         assert!(hint.contains("Keep this host running"), "{hint}");
-        assert!(hint.contains("another terminal"), "{hint}");
+        assert!(!hint.contains("credential --runtime-dir"), "{hint}");
         assert!(
-            hint.contains("open Host access at https://conversations.example/settings"),
+            hint.contains("Open Host access at https://conversations.example/settings"),
             "{hint}"
         );
         assert!(hint.contains("paste the public host descriptor"), "{hint}");
         assert!(hint.contains("click Connect machine"), "{hint}");
         assert!(hint.contains("browser approval prompt"), "{hint}");
-        assert!(
-            !hint.contains("chd1."),
-            "the descriptor itself is never printed"
-        );
     }
 
     #[test]
