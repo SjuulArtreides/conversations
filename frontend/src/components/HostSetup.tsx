@@ -208,6 +208,12 @@ export function HostSetup({
     !!host &&
     ((online.isSuccess && online.data === false) || accessCode === "offline");
   const refusal = accessCode === "refused" ? (access.error?.message ?? "") : "";
+  // The regular access poll retries temporary connection capacity refusals.
+  const hostBusy =
+    connected &&
+    /too many private connection requests are open|too many private connections are open/.test(
+      refusal,
+    );
   const identityDenied =
     /unknown, revoked or expired credential or delegation|does not have an approved owner credential|(?:credential|browser key|key) (?:is |was )?(?:unknown|revoked|expired|not approved)/i.test(
       refusal,
@@ -215,7 +221,7 @@ export function HostSetup({
   const approvalNeeded =
     connected && access.isError && (accessCode === "locked" || identityDenied);
   const refusalReview =
-    connected && accessCode === "refused" && !identityDenied;
+    connected && accessCode === "refused" && !identityDenied && !hostBusy;
   const insufficientPermissions =
     /no current grant|capability outside credential ceiling|operation outside.*delegation.*scope|only an owner credential may change session metadata/i.test(
       refusal,
@@ -227,7 +233,11 @@ export function HostSetup({
     publication.registration.data === true;
   const problem =
     online.error ??
-    (access.isError && !approvalNeeded && !refusalReview && !offline
+    (access.isError &&
+    !approvalNeeded &&
+    !refusalReview &&
+    !hostBusy &&
+    !offline
       ? access.error
       : null);
   const approvalCommand = publication.key.data
@@ -290,21 +300,23 @@ export function HostSetup({
     ? "Approved for reading and starting sessions"
     : reviewNeeded
       ? "Needs review — permissions are limited"
-      : refusalReview
-        ? insufficientPermissions
-          ? "Needs review — current permissions are insufficient"
-          : "Approval or permissions need review"
-        : !host || !connected
-          ? "Waiting for machine connection"
-          : checking
-            ? "Checking browser approval…"
-            : mode === "passkey" && approvalNeeded
-              ? "Locked — unlock with your passkey"
-              : waiting
-                ? "Waiting for approval on your machine"
-                : problem
-                  ? "Could not verify approval"
-                  : "Not approved";
+      : hostBusy
+        ? "Machine busy — checking again shortly"
+        : refusalReview
+          ? insufficientPermissions
+            ? "Needs review — current permissions are insufficient"
+            : "Approval or permissions need review"
+          : !host || !connected
+            ? "Waiting for machine connection"
+            : checking
+              ? "Checking browser approval…"
+              : mode === "passkey" && approvalNeeded
+                ? "Locked — unlock with your passkey"
+                : waiting
+                  ? "Waiting for approval on your machine"
+                  : problem
+                    ? "Could not verify approval"
+                    : "Not approved";
 
   return (
     <section aria-labelledby="host-setup-heading" className="space-y-5">
@@ -695,6 +707,12 @@ export function HostSetup({
             </p>
           )}
         </div>
+      )}
+      {hostBusy && (
+        <p role="status" className="text-sm">
+          {host!.label} is busy handling private connections. This page will
+          check again automatically.
+        </p>
       )}
       {refusalReview && (
         <div role="alert" className="space-y-2 text-sm text-destructive">

@@ -627,3 +627,57 @@ it.each([
     expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
   },
 );
+
+it.each([
+  "too many private connection requests are open",
+  "too many private connections are open",
+])(
+  "shows host connection saturation as temporarily busy, not approval, and recovers: %s",
+  async (reason) => {
+    await connect();
+    mocks.registration = true;
+    mocks.access.mockRejectedValue(new HostControlError(reason, "refused"));
+    const { queryClient } = renderWithProviders(<HostSetup />);
+    expect(
+      await progress().findByText("Machine busy — checking again shortly"),
+    ).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "is busy handling private connections",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/permissions need review/i)).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Prepare this browser for approval",
+      }),
+    ).toBeNull();
+    expect(screen.queryByText(/Waiting for browser approval on/)).toBeNull();
+    // Busy does not trigger an extra immediate retry beyond normal polling.
+    const callsWhileBusy = mocks.access.mock.calls.length;
+    expect(callsWhileBusy).toBeLessThanOrEqual(2);
+
+    mocks.access.mockResolvedValue({ canRead: true, canStart: true });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["host-setup-access"] });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Go to sessions" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Machine busy — checking again shortly"),
+    ).toBeNull();
+  },
+);
+
+it("does not show an actual permission refusal as busy", async () => {
+  await connect();
+  mocks.registration = true;
+  mocks.access.mockRejectedValue(
+    new HostControlError("no current grant", "refused"),
+  );
+  renderWithProviders(<HostSetup />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Permissions need review",
+  );
+  expect(screen.queryByText("Machine busy — checking again shortly")).toBeNull();
+});
