@@ -168,8 +168,12 @@ it("walks a new user from install through start, descriptor, connect and approva
     `conversations host --server '${window.location.origin}'`,
   );
   expect(steps[2]).toHaveTextContent(
-    "conversations credential --runtime-dir … descriptor",
+    "it prints a public descriptor starting with chd1. in its terminal output",
   );
+  expect(steps[2]).toHaveTextContent(
+    "Older CLI versions print a descriptor command instead",
+  );
+  expect(steps[2]).not.toHaveTextContent("credential --runtime-dir");
   expect(
     within(steps[3]).getByRole("textbox", { name: "Host descriptor" }),
   ).toBeVisible();
@@ -201,6 +205,44 @@ it("leads waiting approval with the next action and terminal approval for remote
   expect(local).toHaveTextContent("Trust public key");
   expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
   expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it("copies the standard base64 browser public key for the host terminal prompt", async () => {
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  await connect();
+  mocks.registration = true;
+  renderWithProviders(<HostSetup />);
+  const prompt = await screen.findByRole("region", {
+    name: "Approve at the host terminal prompt",
+  });
+  expect(prompt).toHaveTextContent("paste this browser’s key there");
+  expect(prompt).toHaveTextContent("fingerprint it shows matches");
+  expect(screen.getByText("browser-fingerprint")).toBeVisible();
+  await user.click(
+    within(prompt).getByRole("button", { name: "Copy browser public key" }),
+  );
+  // btoa of [4, 1, 2, 3]: the same encoding as the approval command.
+  expect(writeText).toHaveBeenCalledWith("BAECAw==");
+  const terminal = screen.getByRole("region", {
+    name: "Terminal approval instructions",
+  });
+  expect(terminal).toHaveTextContent("--public-key BAECAw==");
+  expect(
+    within(terminal).getByRole("button", { name: "Copy approval command" }),
+  ).toBeVisible();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it("tells new users the CLI first start offers a setup link or a pasted key", () => {
+  renderWithProviders(<HostSetup />);
+  const steps = within(
+    screen.getByRole("list", { name: "Connect a machine" }),
+  ).getAllByRole("listitem");
+  expect(steps[4]).toHaveTextContent("offer a setup link or let you paste");
+  expect(steps[4]).toHaveTextContent("approve it explicitly");
 });
 
 const site = "https://conversations.example.com";

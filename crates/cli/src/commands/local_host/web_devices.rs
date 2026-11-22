@@ -37,33 +37,37 @@ pub(super) async fn configure(State(state): State<Arc<WebState>>) -> Response {
     }
 }
 
+/// Begin a local-owner device enrollment and return its short-lived
+/// `/host-link` setup link. Shared by the loopback UI and the terminal
+/// onboarding prompt; the registration it produces still waits for local
+/// approval ([`decide_device`]).
+pub(in crate::commands::local_host) fn setup_link(dir: &Path, server: &str) -> Result<String> {
+    let settings = super::super::settings::Settings::load(dir)?;
+    let (webauthn, rp_id) = passkey::relying_party(&settings)?;
+    let origin = reqwest::Url::parse(server)?.origin().ascii_serialization();
+    anyhow::ensure!(settings.webauthn.origins.iter().any(|allowed| allowed == &origin), "This server is not in the host's configured passkey origins. Use the configured server on your laptop.");
+    let mut store = Store::open(dir)?;
+    let grants: Vec<String> = GRANTS.iter().map(|s| (*s).to_owned()).collect();
+    let PasskeyResponse::Started { challenge, options } = passkey::enroll_start(
+        &mut store,
+        &webauthn,
+        &rp_id,
+        LABEL,
+        "owner",
+        &grants,
+        authz::store::now_secs(),
+    )?
+    else {
+        anyhow::bail!("unexpected enrollment response")
+    };
+    let descriptor = authz::attest::descriptor(dir)?;
+    passkey::enrollment_link(server, &descriptor, &challenge, &options)
+}
+
 pub(super) async fn start(State(state): State<Arc<WebState>>) -> Response {
     let dir = state.dir.clone();
     let server = state.server.clone();
-    match tokio::task::spawn_blocking(move || -> Result<String> {
-        let settings = super::super::settings::Settings::load(&dir)?;
-        let (webauthn, rp_id) = passkey::relying_party(&settings)?;
-        let origin = reqwest::Url::parse(&server)?.origin().ascii_serialization();
-        anyhow::ensure!(settings.webauthn.origins.iter().any(|allowed| allowed == &origin), "This server is not in the host's configured passkey origins. Use the configured server on your laptop.");
-        let mut store = Store::open(&dir)?;
-        let grants: Vec<String> = GRANTS.iter().map(|s| (*s).to_owned()).collect();
-        let PasskeyResponse::Started { challenge, options } = passkey::enroll_start(
-            &mut store,
-            &webauthn,
-            &rp_id,
-            LABEL,
-            "owner",
-            &grants,
-            authz::store::now_secs(),
-        )?
-        else {
-            anyhow::bail!("unexpected enrollment response")
-        };
-        let descriptor = authz::attest::descriptor(&dir)?;
-        passkey::enrollment_link(&server, &descriptor, &challenge, &options)
-    })
-    .await
-    {
+    match tokio::task::spawn_blocking(move || setup_link(&dir, &server)).await {
         Ok(Ok(link)) => Json(json!({"link":link})).into_response(),
         Ok(Err(err)) => failure(err),
         Err(_) => error(
@@ -73,19 +77,22 @@ pub(super) async fn start(State(state): State<Arc<WebState>>) -> Response {
     }
 }
 
+/// Verified device registrations (from [`setup_link`]) waiting for approval.
+pub(in crate::commands::local_host) fn pending_devices(
+    dir: &Path,
+) -> Result<Vec<passkey::PendingCredential>> {
+    let PasskeyResponse::Pending { pending } = passkey::pending(&Store::open(dir)?)? else {
+        anyhow::bail!("unexpected pending response")
+    };
+    Ok(pending
+        .into_iter()
+        .filter(|p| p.label == LABEL && p.kind == "owner" && p.grants == GRANTS)
+        .collect())
+}
+
 pub(super) async fn pending(State(state): State<Arc<WebState>>) -> Response {
     let dir = state.dir.clone();
-    match tokio::task::spawn_blocking(move || -> Result<Vec<passkey::PendingCredential>> {
-        let PasskeyResponse::Pending { pending } = passkey::pending(&Store::open(&dir)?)? else {
-            anyhow::bail!("unexpected pending response")
-        };
-        Ok(pending
-            .into_iter()
-            .filter(|p| p.label == LABEL && p.kind == "owner" && p.grants == GRANTS)
-            .collect())
-    })
-    .await
-    {
+    match tokio::task::spawn_blocking(move || pending_devices(&dir)).await {
         Ok(Ok(devices)) => Json(json!({"devices":devices})).into_response(),
         Ok(Err(err)) => failure(err),
         Err(_) => error(
@@ -95,41 +102,48 @@ pub(super) async fn pending(State(state): State<Arc<WebState>>) -> Response {
     }
 }
 
-async fn decide(state: Arc<WebState>, id: String, approve: bool) -> Response {
-    if id.len() != 43
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return error(StatusCode::BAD_REQUEST, "Invalid device identifier.");
+/// Locally approve or reject one pending device registration. Reaching this
+/// function is the local-approval step: callers show the owner the device
+/// code first and act only on their explicit decision.
+pub(in crate::commands::local_host) fn decide_device(
+    dir: &Path,
+    id: &str,
+    approve: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        id.len() == 43
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+        "Invalid device identifier."
+    );
+    let mut store = Store::open(dir)?;
+    let PasskeyResponse::Pending { pending } = passkey::pending(&store)? else {
+        anyhow::bail!("unexpected pending response")
+    };
+    anyhow::ensure!(
+        pending.iter().any(|p| p.cred_id == id
+            && p.label == LABEL
+            && p.kind == "owner"
+            && p.grants == GRANTS),
+        "No matching pending device."
+    );
+    if approve {
+        passkey::approve(&mut store, id, authz::store::now_secs())?;
+    } else {
+        let conn = authz::store::open_private(dir, "authz.db")?;
+        let changed = conn.execute(
+            "DELETE FROM pending_credentials WHERE cred_id=?1 AND label=?2 AND kind='owner'",
+            rusqlite::params![id, LABEL],
+        )?;
+        anyhow::ensure!(changed == 1, "No matching pending device.");
     }
+    Ok(())
+}
+
+async fn decide(state: Arc<WebState>, id: String, approve: bool) -> Response {
     let dir = state.dir.clone();
-    match tokio::task::spawn_blocking(move || -> Result<()> {
-        let mut store = Store::open(&dir)?;
-        let PasskeyResponse::Pending { pending } = passkey::pending(&store)? else {
-            anyhow::bail!("unexpected pending response")
-        };
-        anyhow::ensure!(
-            pending.iter().any(|p| p.cred_id == id
-                && p.label == LABEL
-                && p.kind == "owner"
-                && p.grants == GRANTS),
-            "No matching pending device."
-        );
-        if approve {
-            passkey::approve(&mut store, &id, authz::store::now_secs())?;
-        } else {
-            let conn = authz::store::open_private(&dir, "authz.db")?;
-            let changed = conn.execute(
-                "DELETE FROM pending_credentials WHERE cred_id=?1 AND label=?2 AND kind='owner'",
-                rusqlite::params![id, LABEL],
-            )?;
-            anyhow::ensure!(changed == 1, "No matching pending device.");
-        }
-        Ok(())
-    })
-    .await
-    {
+    match tokio::task::spawn_blocking(move || decide_device(&dir, &id, approve)).await {
         Ok(Ok(())) => Json(json!({"ok":true})).into_response(),
         Ok(Err(err)) => failure(err),
         Err(_) => error(

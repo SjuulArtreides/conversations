@@ -14,6 +14,7 @@ mod import;
 mod installer;
 mod linear_metadata;
 mod migration;
+mod onboarding;
 mod opencode_bridge;
 mod order;
 #[cfg(test)]

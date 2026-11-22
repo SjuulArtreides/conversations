@@ -114,6 +114,34 @@ Supported targets:
 | macOS Apple Silicon | `aarch64-apple-darwin` |
 | macOS Intel | `x86_64-apple-darwin` |
 
+### Update an installed CLI
+
+```sh
+conversations self-update --check   # report whether a newer release exists; change nothing
+conversations self-update           # install the latest release over this binary
+```
+
+`self-update` downloads from the public
+`SjuulArtreides/conversations` GitHub release only, anonymously over HTTPS
+with bounded sizes and timeouts. It installs the latest strict `vX.Y.Z`
+release only when it is newer than the running version; it never downgrades
+or reinstalls the same version. It picks the archive for the architecture of
+the running executable (so an Intel binary under Rosetta stays Intel), checks
+the `.sha256` sidecar before extracting only the regular `conversations`
+member, stages it in a temporary file next to the running executable, checks
+that the staged binary's `--version` reports the expected release, and then
+atomically renames it over the old binary. If any step fails, the existing
+binary is left in place and the staged file is removed. Nothing is written
+outside the executable's directory.
+
+It never uses `sudo`. If the executable's directory is not writable by you
+(for example a system-wide install in `/usr/local/bin`, or a read-only or
+package-manager-managed location such as a Nix store), `self-update` stops
+before downloading the release; update that install the way it was installed,
+for example by rerunning `scripts/install.sh` with the same `INSTALL_DIR`. It
+also does not restart anything: an already-running `conversations host` or
+agent keeps running the old version until you restart it.
+
 ### Tagging a release
 
 The release workflow (`.github/workflows/release.yml`) builds natively for

@@ -9,7 +9,8 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Chevron } from "@/components/ui/chevron";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiError } from "@/lib/api";
@@ -311,10 +312,10 @@ function useCloseLiveSession(
 
       try {
         await action(targetId);
-        // Pick up any concurrent adds/renames; closed id stays filtered.
-        await queryClient.invalidateQueries({
-          queryKey: LIVE_SESSIONS_QUERY_KEY,
-        });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: LIVE_SESSIONS_QUERY_KEY }),
+          queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+        ]);
       } catch (err) {
         // Close failed — restore the tab so the user can see and retry.
         if (previous)
@@ -410,20 +411,29 @@ export function StartNewSessionButton({
   return (
     <div className="flex min-w-0 items-center gap-2">
       {!isLocalHost() && hosts.length > 0 && (
-        <select
-          aria-label="Session host"
-          title="Host for new sessions"
-          className="h-8 max-w-48 min-w-0 rounded-md border border-input bg-background px-2 text-sm"
-          value={active ?? ""}
-          disabled={busy}
-          onChange={(event) => selectHost(event.target.value)}
-        >
-          {hosts.map((host) => (
-            <option key={host.id} value={host.id}>
-              {host.label}
-            </option>
-          ))}
-        </select>
+        // Styled as the outline split button beside it; the native select keeps
+        // keyboard and screen-reader behaviour, the shared Chevron replaces the
+        // browser's arrow.
+        <span className="relative inline-flex max-w-48 min-w-0">
+          <select
+            aria-label="Session host"
+            title="Host for new sessions"
+            className={cn(
+              buttonVariants({ size, variant }),
+              "w-full min-w-0 cursor-pointer appearance-none truncate pr-8 text-left [&>option]:bg-popover [&>option]:text-popover-foreground",
+            )}
+            value={active ?? ""}
+            disabled={busy}
+            onChange={(event) => selectHost(event.target.value)}
+          >
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.label}
+              </option>
+            ))}
+          </select>
+          <Chevron className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" />
+        </span>
       )}
       <HostSplitButton
         label={label}

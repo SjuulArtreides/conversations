@@ -287,10 +287,14 @@ export function HostSetup({
     !offline
       ? access.error
       : null);
+  // Standard base64 of the raw ES256 public key, exactly as the CLI accepts it.
+  const browserPublicKey = publication.key.data
+    ? toBase64(publication.key.data.publicRaw)
+    : "";
   const approvalCommand = publication.key.data
     ? [
         "conversations credential add --kind owner --alg es256",
-        `--public-key ${toBase64(publication.key.data.publicRaw)}`,
+        `--public-key ${browserPublicKey}`,
         `--label '${browserName.replaceAll("'", "'\"'\"'")}'`,
         ...[
           "history.read",
@@ -518,12 +522,14 @@ export function HostSetup({
           <li className="space-y-1">
             <p className="font-medium">Copy the public host descriptor</p>
             <p className="text-muted-foreground">
-              In another terminal on that machine, run the descriptor command
-              that <code>conversations host</code> printed at startup:
-              <code className="mt-1 block break-all">
-                conversations credential --runtime-dir … descriptor
-              </code>
-              It prints a public descriptor starting with <code>chd1.</code>.
+              When <code>conversations host</code> starts, it prints a public
+              descriptor starting with <code>chd1.</code> in its terminal
+              output. Copy that whole line.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Older CLI versions print a descriptor command instead. Run it in
+              another terminal on that machine to get the <code>chd1.</code>{" "}
+              descriptor.
             </p>
           </li>
           <li>
@@ -564,6 +570,11 @@ export function HostSetup({
             <p className="text-muted-foreground">
               After connecting, this page asks you to prepare this browser, then
               shows how to approve it on that machine.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              On first start, newer CLI versions offer a setup link or let you
+              paste this browser’s public key at the terminal prompt. They then
+              show its fingerprint and ask you to approve it explicitly.
             </p>
           </li>
         </ol>
@@ -697,6 +708,27 @@ export function HostSetup({
               >
                 Copy fingerprint
               </Button>
+              <section
+                aria-labelledby="prompt-approval-heading"
+                className="space-y-2"
+              >
+                <h3 id="prompt-approval-heading" className="font-medium">
+                  Approve at the host terminal prompt
+                </h3>
+                <p>
+                  When <code>conversations host</code> on {host!.label} asks
+                  for a browser public key, paste this browser’s key there.
+                  Approve only if the fingerprint it shows matches the one
+                  above.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void copy(browserPublicKey)}
+                >
+                  Copy browser public key
+                </Button>
+              </section>
               <section
                 aria-labelledby="terminal-approval-heading"
                 className="space-y-2"

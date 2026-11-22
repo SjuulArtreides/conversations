@@ -144,7 +144,7 @@ function SessionCollection({ local }: { local: boolean }) {
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean);
-  const privateItems = (privateQuery.data ?? []).filter(
+  const matchingPrivateItems = privateQuery.data.filter(
     (entry) =>
       (local || scope === "all") &&
       (!project || entry.cwd === project) &&
@@ -152,9 +152,18 @@ function SessionCollection({ local }: { local: boolean }) {
         `${privateSessionTitle(entry)} ${entry.cwd} ${entry.agent} ${(entry.prs ?? []).join(" ")}`
           .toLowerCase()
           .includes(term),
-      ) &&
-      (showEmpty || entry.running || entry.messages > 0 || terms.length > 0),
+      ),
   );
+  const isHiddenEmpty = (entry: SessionEntry) =>
+    !entry.running && entry.messages === 0 && entry.reopenable !== true;
+  const privateItems =
+    showEmpty || terms.length
+      ? matchingPrivateItems
+      : matchingPrivateItems.filter((entry) => !isHiddenEmpty(entry));
+  const hiddenEmptyCount =
+    showEmpty || terms.length
+      ? 0
+      : matchingPrivateItems.filter(isHiddenEmpty).length;
   // Only eligible private rows suppress a shared copy: central scope and
   // filter decisions remain independent of local possession of a transcript.
   const privateIds = new Set(privateItems.map((entry) => entry.id));
@@ -306,21 +315,11 @@ function SessionCollection({ local }: { local: boolean }) {
           )}
         </div>
       )}
-      {!showEmpty &&
-        !terms.length &&
-        (privateQuery.data ?? []).some(
-          (entry) => !entry.running && entry.messages === 0,
-        ) && (
-          <Button variant="outline" onClick={() => setShowEmpty(true)}>
-            Show stopped sessions without messages (
-            {
-              (privateQuery.data ?? []).filter(
-                (entry) => !entry.running && entry.messages === 0,
-              ).length
-            }
-            )
-          </Button>
-        )}
+      {hiddenEmptyCount > 0 && (
+        <Button variant="outline" onClick={() => setShowEmpty(true)}>
+          Show stopped sessions without messages ({hiddenEmptyCount})
+        </Button>
+      )}
       {ranked.length > limit && (
         <Button
           variant="outline"

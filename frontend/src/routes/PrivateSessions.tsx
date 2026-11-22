@@ -13,7 +13,12 @@ import { useActiveHost } from "@/lib/useActiveHost";
 export { useActiveHost } from "@/lib/useActiveHost";
 import { AllHostSessionTabs } from "@/components/LiveTabs";
 import * as React from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   PrivateSessionCard,
@@ -65,16 +70,10 @@ export function useHostSessions(
 ) {
   const archive = useQuery({
     queryKey: privateSessionsKey(hostId),
-    queryFn: async () => {
-      const list = await hostControl.privateRead(
-        hostId!,
-        (c) => listSessions(c),
-        { allowUnlock: false },
-      );
-      // Keep a just-closed tab out even if this fetch was already in flight
-      // when the user hit ✕; the scope is per-host so sibling hosts untouched.
-      return filterClosing(privateScope(hostId!), list);
-    },
+    queryFn: () =>
+      hostControl.privateRead(hostId!, (c) => listSessions(c), {
+        allowUnlock: false,
+      }),
     enabled: hostId !== null && allowed,
     retry: false,
     staleTime: 300_000,
@@ -266,7 +265,9 @@ export function PrivateSessionList({
   );
   const running = sorted.filter((s) => s.running);
   const recent = sorted.filter(
-    (s) => !s.running && (s.messages > 0 || terms.length > 0),
+    (s) =>
+      !s.running &&
+      (s.messages > 0 || s.reopenable === true || terms.length > 0),
   );
   const visible = exactTitleFirst(
     [...running, ...recent.slice(0, recentLimit)],
@@ -274,7 +275,11 @@ export function PrivateSessionList({
     privateSessionTitle,
   );
   const empty = sorted.filter(
-    (s) => !s.running && s.messages === 0 && terms.length === 0,
+    (s) =>
+      !s.running &&
+      s.messages === 0 &&
+      s.reopenable !== true &&
+      terms.length === 0,
   );
   return (
     <div className="space-y-4" data-testid="private-sessions">
@@ -357,14 +362,17 @@ export function PrivateSessionView() {
   const { id = "" } = useParams<{ id: string }>();
   const selectedHost = useActiveHost();
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const hostId = params.get("host") ?? selectedHost;
   React.useEffect(() => {
     if (!params.has("host") && selectedHost) {
       const next = new URLSearchParams(params);
       next.set("host", selectedHost);
-      setParams(next, { replace: true });
+      // Carry the navigation state over: "New session" uses it to ask the
+      // terminal to fit its grid to this screen once the session has loaded.
+      setParams(next, { replace: true, state: location.state });
     }
-  }, [params, selectedHost, setParams]);
+  }, [params, selectedHost, setParams, location.state]);
   // Remount all session-owned state before rendering another route or host.
   return (
     <SessionPrProvider hostId={hostId ?? undefined}>

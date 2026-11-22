@@ -290,6 +290,50 @@ fn accepting_the_offer_runs_the_foreground_host_with_the_saved_login() {
         !screen.contains("No localhost login"),
         "the host must use the saved login:\n{screen}"
     );
+    terminal.wait_for_text("No browser is approved for this host yet");
+    terminal.press("\r");
+    terminal.wait_for_text("The host keeps running");
     // Foreground: login has become the host and keeps running.
     assert!(terminal.child.try_wait().unwrap().is_none(), "{screen}");
+}
+
+#[test]
+fn first_login_can_approve_a_pasted_browser_key_after_confirmation() {
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use base64::Engine;
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+    let key =
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+    let public_key = key.public_key().as_ref();
+    let fingerprint =
+        URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, public_key));
+
+    let env = Env::new();
+    let mut terminal = env.terminal();
+    terminal.reach_host_offer();
+    terminal.press("y");
+    terminal.wait_for_text("Skip for now");
+    // The test server uses HTTP, so the two choices are paste and skip.
+    terminal.press("\x1b[A\r");
+    terminal.wait_for_text("Paste the browser public key");
+    terminal.press(&format!("{}\r", STANDARD.encode(public_key)));
+    terminal.wait_for_text(&fingerprint);
+
+    let conn = rusqlite::Connection::open(env.runtime().join("authz.db")).unwrap();
+    let approved = || {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM credentials WHERE cred_id=?1 AND kind='owner')",
+            [&fingerprint],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    };
+    assert!(!approved(), "a pasted key requires explicit approval");
+    terminal.wait_for_text("Approve it as an owner");
+    terminal.press("y");
+    terminal.wait_for_text("Approved browser");
+    assert!(approved());
 }

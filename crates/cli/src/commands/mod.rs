@@ -8,6 +8,8 @@ pub mod local_host;
 pub mod login;
 pub mod ping;
 pub mod pr;
+#[cfg(unix)]
+pub mod self_update;
 pub mod upload;
 
 pub mod mcp;

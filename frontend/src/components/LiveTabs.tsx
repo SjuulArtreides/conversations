@@ -607,24 +607,17 @@ export function PrivateSessionTabs({
     const nativeId = entry.nativeId;
     setEndingId(id);
 
-    // Optimistic removal from this host's caches so the tab goes away now.
-    // The scope is per-host so another paired host's caches stay untouched.
-    markClosing(privateScope(hostId), nativeId);
-    const keys = [
-      ["private", hostId, "sessions"] as const,
-      ["private", hostId, "active-sessions"] as const,
-    ];
-    const snapshots = keys.map(
-      (key) => [key, queryClient.getQueryData<SessionEntry[]>(key)] as const,
+    // Hide the live tab while the host stops it. Keep its history cached.
+    const scope = privateScope(hostId);
+    markClosing(scope, nativeId);
+    const activeKey = ["private", hostId, "active-sessions"] as const;
+    await queryClient.cancelQueries({ queryKey: activeKey });
+    const previous = queryClient
+      .getQueryData<SessionEntry[]>(activeKey)
+      ?.find((session) => session.id === nativeId);
+    queryClient.setQueryData<SessionEntry[]>(activeKey, (sessions) =>
+      sessions?.filter((session) => session.id !== nativeId),
     );
-    await Promise.all(
-      keys.map((key) => queryClient.cancelQueries({ queryKey: key })),
-    );
-    for (const key of keys) {
-      queryClient.setQueryData<SessionEntry[]>(key, (prev) =>
-        prev?.filter((entry) => entry.id !== nativeId),
-      );
-    }
     if (id === currentKey) {
       const next = running.find((entry) => entry.id !== id);
       if (next) select(next.id);
@@ -632,16 +625,21 @@ export function PrivateSessionTabs({
 
     try {
       await hostControl.endSession(nativeId, hostId);
-      await queryClient.invalidateQueries({ queryKey: ["private", hostId] });
     } catch (error) {
-      for (const [key, snapshot] of snapshots) {
-        if (snapshot) queryClient.setQueryData(key, snapshot);
+      if (previous) {
+        queryClient.setQueryData<SessionEntry[]>(activeKey, (sessions = []) =>
+          sessions.some((session) => session.id === nativeId)
+            ? sessions
+            : [...sessions, previous],
+        );
       }
       toast((error as Error).message, "error");
+      return;
     } finally {
-      clearClosing(privateScope(hostId), nativeId);
+      clearClosing(scope, nativeId);
       setEndingId(null);
     }
+    await queryClient.invalidateQueries({ queryKey: ["private", hostId] });
   }
   const [searchParams] = useSearchParams();
   const storageKey = multiHost

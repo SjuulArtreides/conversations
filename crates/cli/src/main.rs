@@ -83,6 +83,8 @@ fn main() -> ExitCode {
         Command::Logout => commands::login::logout(&args.global),
         Command::Ping => commands::ping::run(&args.global),
         Command::Pr(pr_args) => commands::pr::run(&args.global, pr_args),
+        #[cfg(unix)]
+        Command::SelfUpdate(update_args) => commands::self_update::run(update_args),
     };
 
     match result {
