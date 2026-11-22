@@ -312,10 +312,10 @@ function useCloseLiveSession(
 
       try {
         await action(targetId);
-        // Pick up any concurrent adds/renames; closed id stays filtered.
-        await queryClient.invalidateQueries({
-          queryKey: LIVE_SESSIONS_QUERY_KEY,
-        });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: LIVE_SESSIONS_QUERY_KEY }),
+          queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+        ]);
       } catch (err) {
         // Close failed — restore the tab so the user can see and retry.
         if (previous)
