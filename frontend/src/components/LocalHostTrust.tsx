@@ -88,6 +88,8 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
   const [selected, setSelected] = React.useState<{
     email: string;
     key: PublishedBrowserKey;
+    /** A key your own account published: trusted with full access, no checklist. */
+    own?: boolean;
   } | null>(null);
   const [label, setLabel] = React.useState("");
   const [compared, setCompared] = React.useState(false);
@@ -171,13 +173,13 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
   }
 
   /**
-   * A key your own account published: open the same comparison step, with
-   * every permission preselected (it is your browser). Nothing is granted
-   * until you compare the fingerprint and choose Trust public key.
+   * A key your own account published: open the comparison step with full
+   * access and no permission checklist (it is your browser). Nothing is
+   * granted until you compare the fingerprint and choose Trust this device.
    */
   function reviewWaitingKey(email: string, key: PublishedBrowserKey) {
     setAddOpen(true);
-    setSelected({ email, key: { ...key } });
+    setSelected({ email, key: { ...key }, own: true });
     setLabel(key.label.slice(0, 64));
     setCompared(false);
     setGrants(permissions.map(([cap]) => cap));
@@ -312,6 +314,20 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                     <p className="text-xs text-muted-foreground">{displayed}</p>
 
                     {!credential.revoked && missing.length > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={upgrade.isPending}
+                        onClick={() =>
+                          upgrade.mutate({
+                            kid: credential.kid,
+                            grants: missing,
+                          })
+                        }
+                      >
+                        Give full access
+                      </Button>
+                    )}
+                    {!credential.revoked && missing.length > 0 && (
                       <Collapsible label="Add permissions">
                         <div className="space-y-2">
                           <p className="text-xs text-muted-foreground">
@@ -363,12 +379,16 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                     {upgrade.isSuccess &&
                       upgrade.variables?.kid === credential.kid && (
                         <p role="status" className="text-xs">
-                          {upgrade.data.added.length
-                            ? "Permission added"
-                            : "Already allowed"}
-                          :{" "}
-                          {PERMISSION_LABELS[upgrade.variables.grants[0]] ??
-                            upgrade.variables.grants[0]}
+                          {upgrade.variables.grants.length > 1
+                            ? "Full access given"
+                            : `${
+                                upgrade.data.added.length
+                                  ? "Permission added"
+                                  : "Already allowed"
+                              }: ${
+                                PERMISSION_LABELS[upgrade.variables.grants[0]] ??
+                                upgrade.variables.grants[0]
+                              }`}
                           . Renew access to this host in the hosted app with
                           your passkey (Touch ID) to use it.
                         </p>
@@ -515,6 +535,12 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                   disabled={trust.isPending}
                 />
               </label>
+              {selected.own ? (
+                <p className="text-sm text-muted-foreground">
+                  This is your own browser. Trusting it gives it full access to
+                  this host.
+                </p>
+              ) : (
               <fieldset disabled={trust.isPending} className="space-y-2">
                 <legend className="mb-2 text-sm font-medium">
                   Permissions on this host
@@ -536,6 +562,7 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                   </label>
                 ))}
               </fieldset>
+              )}
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -554,7 +581,11 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                 }
                 onClick={() => trust.mutate()}
               >
-                {trust.isPending ? "Trusting…" : "Trust public key"}
+                {trust.isPending
+                  ? "Trusting…"
+                  : selected.own
+                    ? "Trust this device"
+                    : "Trust public key"}
               </Button>
               {trust.error && (
                 <p role="alert" className="text-sm text-destructive">
@@ -563,7 +594,9 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
               )}
               {trust.isSuccess && (
                 <p role="status" className="text-sm">
-                  Public key trusted with the selected permissions.
+                  {selected.own
+                    ? "This device is trusted with full access."
+                    : "Public key trusted with the selected permissions."}
                 </p>
               )}
             </div>

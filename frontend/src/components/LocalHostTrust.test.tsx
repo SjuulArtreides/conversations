@@ -368,8 +368,12 @@ describe("browser keys waiting for approval", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Compare and trust" }));
-    const trust = screen.getByRole("button", { name: "Trust public key" });
+    const trust = screen.getByRole("button", { name: "Trust this device" });
     expect(trust).toBeDisabled();
+    // Your own browser gets full access: no permission checklist to work through.
+    expect(
+      screen.queryByRole("checkbox", { name: "Read session history" }),
+    ).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("checkbox", {
         name: /independently compared this exact fingerprint/,
@@ -393,14 +397,68 @@ describe("browser keys waiting for approval", () => {
       label: first.label,
       compared: true,
     });
-    expect(body.grants).toEqual(
-      expect.arrayContaining([
-        "history.read",
-        "session.write",
-        "session.start",
+    expect([...body.grants].sort()).toEqual(
+      [
         "browser_trust.manage",
-      ]),
+        "history.read",
+        "host.settings_read",
+        "host.settings_write",
+        "passkey.manage",
+        "session.manage_sharing",
+        "session.pr_comment",
+        "session.reopen",
+        "session.start",
+        "session.write",
+      ],
     );
+  });
+
+  it("gives an approved key every missing permission in one click", async () => {
+    const user = userEvent.setup();
+    const base = vi.mocked(localRequest).getMockImplementation()!;
+    vi.mocked(localRequest).mockImplementation(async (path, init) => {
+      if (path === "/api/status")
+        return {
+          descriptor: "ac-host-v1:public-host-key",
+          server: "https://hosted.example",
+          credentials: [
+            {
+              kid: first.kid,
+              label: "Legacy owner key",
+              revoked: false,
+              grants: [
+                { cap: "history.read", session: "*" },
+                { cap: "session.write", session: "*" },
+                { cap: "session.pr_comment", session: "*" },
+              ],
+            },
+          ],
+        } as never;
+      if (path === "/api/trust/upgrade")
+        return { kid: first.kid, added: ["passkey.manage"] } as never;
+      return base(path, init);
+    });
+    renderWithProviders(<LocalHostTrust />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Give full access" }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Full access given",
+    );
+    const call = vi
+      .mocked(localRequest)
+      .mock.calls.find(([path]) => path === "/api/trust/upgrade")!;
+    expect(JSON.parse(String(call[1]?.body))).toEqual({
+      kid: first.kid,
+      grants: [
+        "session.manage_sharing",
+        "host.settings_read",
+        "host.settings_write",
+        "passkey.manage",
+        "browser_trust.manage",
+      ],
+    });
   });
 
   it("shows nothing extra when every published key is already approved", async () => {
