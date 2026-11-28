@@ -116,3 +116,16 @@ features and a patch bump for fixes. After the merge, when CI passes on
 
 A merge that keeps the same version releases nothing. Do not push release
 tags by hand.
+
+## Commit messages and release versions
+
+Use Conventional Commit subjects such as `fix(cli): handle closed sessions`
+or `feat: add a terminal shortcut`. CI checks each non-merge commit in a PR.
+
+Before pushing a release-worthy PR, bump the workspace version in `Cargo.toml`
+and run `cargo check --workspace` to update `Cargo.lock`. Include both files.
+Use one bump per PR based on the largest change: `fix` and `perf` need a patch,
+`feat` needs a minor, and a breaking change marked with `!` or a
+`BREAKING CHANGE:` footer needs a minor before 1.0 and a major from 1.0 onward.
+Other commit types can keep the current version. Once the bump lands on main,
+CI publishes the server image and the release workflow tags it and builds the CLI.
