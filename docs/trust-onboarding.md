@@ -146,6 +146,19 @@ once it is trusted:
 - **Add permissions** later offers only the extra, owner-level permissions;
 - to change anything else, revoke the key and approve a new browser key.
 
+### Approve a browser from its fingerprint alone
+
+A browser that is signed in but not connected to any machine can still be
+approved. On **Sessions**, choose **Publish my fingerprint**, then approve that
+fingerprint on your machine as above. Keep **Sessions** open: the browser asks
+each machine your account has connected whether it approved this exact key.
+When the machine opens a private connection for the key, the browser connects
+to that machine by itself and lists its sessions. You don't need a setup link.
+
+The server only tells the browser which machines your account connected. The
+browser connects only after the machine answers with a statement signed by its
+own identity key.
+
 ### Check the ready state
 
 Back in the hosted app, all three steps show a check mark, and the page

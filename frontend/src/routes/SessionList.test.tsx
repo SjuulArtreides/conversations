@@ -8,7 +8,7 @@ import type { Summary, Visibility } from "@/lib/types";
 import { SessionList } from "./SessionList";
 import { PrivateSessionTabs } from "@/components/LiveTabs";
 import type { PrivateChannel } from "@/lib/privateChannel";
-import { loadBrowserKey } from "@/lib/hostAuth";
+import { loadBrowserKey, toBase64 } from "@/lib/hostAuth";
 import { activeHost } from "@/lib/hostPairing";
 
 function summary(
@@ -150,6 +150,10 @@ describe("SessionList scope tabs", () => {
     expect(screen.queryByText("mine-only")).not.toBeInTheDocument();
   });
 });
+
+vi.mock("@/lib/hostDiscovery", () => ({
+  connectApprovedHost: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("@/lib/hostControl", async (original) => {
   const actual = await original<typeof import("@/lib/hostControl")>();
@@ -414,19 +418,21 @@ it("publishes the browser fingerprint from Sessions without pairing a host", asy
   while (activeHost()) unpairHost(activeHost()!.id);
   const key = await loadBrowserKey();
   const challenge = "a".repeat(32);
-  vi.mocked(api.browserKeyChallenge).mockImplementation(async (public_key, label) => ({
-    challenge,
-    payload: JSON.stringify({
-      v: 1,
-      purpose: "publish_browser_key",
-      user_email: "me@x.com",
-      public_key,
-      kid: key.kid,
-      label,
+  vi.mocked(api.browserKeyChallenge).mockImplementation(
+    async (public_key, label) => ({
       challenge,
-      expires_at: Math.floor(Date.now() / 1000) + 300,
+      payload: JSON.stringify({
+        v: 1,
+        purpose: "publish_browser_key",
+        user_email: "me@x.com",
+        public_key,
+        kid: key.kid,
+        label,
+        challenge,
+        expires_at: Math.floor(Date.now() / 1000) + 300,
+      }),
     }),
-  }));
+  );
   vi.mocked(api.publishBrowserKey).mockImplementation(async () => ({
     key: {
       kid: key.kid,
@@ -441,23 +447,91 @@ it("publishes the browser fingerprint from Sessions without pairing a host", asy
   expect(
     screen.getByRole("heading", { name: "Set up this browser" }),
   ).toBeVisible();
-  const publish = screen.getByRole("button", { name: "Publish my fingerprint" });
+  const publish = screen.getByRole("button", {
+    name: "Publish my fingerprint",
+  });
   expect(api.publishBrowserKey).not.toHaveBeenCalled();
   await waitFor(() => expect(publish).toBeEnabled());
   await userEvent.click(publish);
-  expect(await screen.findByText("Fingerprint published.")).toBeVisible();
+  expect(
+    await screen.findByText(
+      "Fingerprint published. Waiting for approval on your machine…",
+    ),
+  ).toBeVisible();
   expect(screen.getByText(key.kid)).toBeVisible();
-  expect(api.publishBrowserKey).toHaveBeenCalledWith(challenge, expect.any(String));
-  expect(activeHost()).toBeNull();
-  expect(screen.getByRole("link", { name: "Set up a machine" })).toHaveAttribute(
-    "href",
-    "/settings",
+  expect(api.publishBrowserKey).toHaveBeenCalledWith(
+    challenge,
+    expect.any(String),
   );
+  expect(activeHost()).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "Set up a machine" }),
+  ).toHaveAttribute("href", "/settings");
   expect(
     screen.queryByRole("button", { name: "Connect this device" }),
   ).toBeNull();
   expect(screen.queryByRole("textbox", { name: "Setup link" })).toBeNull();
 });
+
+it("shows the machine's sessions as soon as the machine approves the published browser", async () => {
+  const { activeHost, unpairHost, pairHost } =
+    await import("@/lib/hostPairing");
+  const { makeTestHost } = await import("@/lib/testHost");
+  const { hostControl } = await import("@/lib/hostControl");
+  const { connectApprovedHost } = await import("@/lib/hostDiscovery");
+  while (activeHost()) unpairHost(activeHost()!.id);
+  const key = await loadBrowserKey();
+  vi.mocked(api.userKeyDirectory).mockResolvedValue([
+    {
+      email: "me@x.com",
+      display_name: null,
+      keys: [
+        {
+          kid: key.kid,
+          alg: "es256",
+          public_key: toBase64(key.publicRaw),
+          label: "My browser",
+          created_at: "2026-11-28",
+        },
+      ],
+    },
+  ]);
+  const host = await makeTestHost();
+  vi.mocked(connectApprovedHost)
+    .mockResolvedValueOnce(null)
+    .mockImplementationOnce(() =>
+      pairHost(host.descriptor, "My machine", "browser-key"),
+    );
+  vi.mocked(hostControl.privateRead).mockResolvedValue([
+    {
+      id: "approved-1",
+      title: "Mac work",
+      agent: "codex",
+      cwd: "/work",
+      messages: 0,
+      running: true,
+    },
+  ]);
+  renderWithProviders(<SessionList />);
+  expect(
+    await screen.findByText(
+      "Fingerprint published. Waiting for approval on your machine…",
+    ),
+  ).toBeVisible();
+  await waitFor(() => expect(activeHost()?.id).toBe(host.id), {
+    timeout: 8000,
+  });
+  expect(activeHost()?.authMode).toBe("browser-key");
+  expect(
+    await screen.findByRole("link", { name: /^Mac work\b/ }),
+  ).toBeVisible();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("heading", { name: "Set up this browser" }),
+    ).not.toBeInTheDocument(),
+  );
+  vi.mocked(api.userKeyDirectory).mockResolvedValue([]);
+}, 15000);
 
 it("shows running private sessions while the archive is still loading", async () => {
   const { pairHost } = await import("@/lib/hostPairing");
@@ -518,9 +592,11 @@ it("keeps a private conversation in Sessions after ending it from its live tab",
   vi.mocked(hostControl.privateRead).mockImplementation((_, read) =>
     read(channel),
   );
-  const end = vi.spyOn(hostControl, "endSession").mockImplementation(async () => {
-    running = false;
-  });
+  const end = vi
+    .spyOn(hostControl, "endSession")
+    .mockImplementation(async () => {
+      running = false;
+    });
   try {
     const { queryClient } = renderWithProviders(
       <>
@@ -542,7 +618,9 @@ it("keeps a private conversation in Sessions after ending it from its live tab",
     );
     expect(end).toHaveBeenCalledWith(session.id, host.id);
     await waitFor(() => {
-      expect(queryClient.isFetching({ queryKey: ["private", host.id] })).toBe(0);
+      expect(queryClient.isFetching({ queryKey: ["private", host.id] })).toBe(
+        0,
+      );
       expect(screen.getByRole("link", { name })).toHaveAttribute(
         "href",
         `/private/${session.id}?host=${host.id}`,
