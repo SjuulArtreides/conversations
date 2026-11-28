@@ -115,6 +115,27 @@ describe("HostLink", () => {
     expect(activeHost()?.id).toBe(HOST);
   });
 
+  it("connects a fresh browser with an already approved passkey from the laptop setup link", async () => {
+    window.location.hash = hash;
+    control.unlockHost.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const { queryClient } = renderWithProviders(<HostLink />);
+    queryClient.setQueryData(["host-delegation", HOST], null);
+    const unlock = await screen.findByRole("button", {
+      name: "Use approved passkey",
+    });
+    expect(unlock).toBeDisabled();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(unlock);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["host-delegation", HOST])?.isInvalidated)
+        .toBe(true),
+    );
+    expect(activeHost()?.id).toBe(HOST);
+    expect(control.unlockHost).toHaveBeenCalledWith(HOST);
+    expect(control.finishEnrollment).not.toHaveBeenCalled();
+  });
+
   it("keeps an existing browser-key connection if the new passkey is not approved", async () => {
     await pairHost(DESC, "Laptop", "browser-key");
     window.location.hash = hash;

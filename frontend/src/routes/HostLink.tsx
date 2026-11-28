@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { fromBase64Url } from "@/lib/hostAuth";
@@ -56,6 +57,7 @@ export async function parseHostLink(hash: string): Promise<Ceremony | null> {
  */
 export function HostLink() {
   const navigate = useNavigate();
+  const cache = useQueryClient();
   const local = useLocalHost();
   const [ceremony, setCeremony] = React.useState<Ceremony | null | undefined>(
     undefined,
@@ -150,6 +152,22 @@ export function HostLink() {
     }
   };
 
+  const continueToSessions = async () => {
+    setState({ kind: "working" });
+    try {
+      if (!alreadyPaired) await pairHost(ceremony.descriptor, "My host");
+      await unlockHost(ceremony.host.id);
+      setHostAuthMode(ceremony.host.id, "passkey");
+      closePrivateChannels();
+      await cache.invalidateQueries({
+        queryKey: ["host-delegation", ceremony.host.id],
+      });
+      navigate("/");
+    } catch (error) {
+      setState({ kind: "error", message: (error as Error).message });
+    }
+  };
+
   return (
     <div className="mx-auto max-w-xl space-y-3 p-4">
       <h1 className="text-xl font-semibold">Connect this device</h1>
@@ -177,12 +195,21 @@ export function HostLink() {
         </label>
       )}
       {!registered && (
-        <Button
-          onClick={() => void register()}
-          disabled={state.kind === "working" || (!alreadyPaired && !confirmed)}
-        >
-          {state.kind === "working" ? "Waiting for passkey…" : "Create passkey"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => void register()}
+            disabled={state.kind === "working" || (!alreadyPaired && !confirmed)}
+          >
+            {state.kind === "working" ? "Waiting for passkey…" : "Create passkey"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void continueToSessions()}
+            disabled={state.kind === "working" || (!alreadyPaired && !confirmed)}
+          >
+            Use approved passkey
+          </Button>
+        </div>
       )}
       {state.kind === "error" && (
         <p role="alert" className="text-sm text-red-600">
@@ -224,18 +251,7 @@ export function HostLink() {
           </details>
           <Button
             disabled={state.kind === "working"}
-            onClick={() => {
-              setState({ kind: "working" });
-              void unlockHost(ceremony.host.id).then(
-                () => {
-                  setHostAuthMode(ceremony.host.id, "passkey");
-                  closePrivateChannels();
-                  navigate("/");
-                },
-                (error: Error) =>
-                  setState({ kind: "error", message: error.message }),
-              );
-            }}
+            onClick={() => void continueToSessions()}
           >
             Continue to sessions
           </Button>
