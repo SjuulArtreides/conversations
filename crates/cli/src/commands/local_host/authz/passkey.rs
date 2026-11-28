@@ -2,9 +2,9 @@
 //! `webauthn-rs` relying-party library (no WebAuthn/CBOR parsing lives here).
 //!
 //! Division of authority:
-//! - A permanent credential exists only after LOCAL approval of the verified
-//!   registration (`approve`, local socket only). A remote caller can at most
-//!   complete a ceremony that a local operator started, and the result waits.
+//! - Permanent owner credentials normally require local approval. Hosted browser
+//!   key approval is a separate, locally enabled ceremony that requires fresh
+//!   passkey verification for each credential and checks authority at insertion.
 //! - A passkey never signs operations. It authorizes a delegation: a temporary
 //!   browser P-256 key (<= 24h). Operations are then signed by that key and
 //!   admitted against the parent's CURRENT grants (see `store::admit`).
@@ -17,7 +17,7 @@
 //! reads every parameter from the stored row. Nothing the caller sends at finish
 //! time can change what is issued.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -947,6 +947,209 @@ pub fn handle(
             challenge,
             response,
         } => delegate_finish(&mut store, &webauthn, &rp_id, &challenge, &response, now),
+    }
+}
+
+const BROWSER_TRUST: &str = "browser_trust";
+
+#[derive(Serialize, Deserialize)]
+struct BrowserTrustApproval {
+    request: super::envelope::BrowserTrust,
+    authority: Option<String>,
+    signer: String,
+    opt_in: i64,
+    approver_epochs: BTreeMap<String, i64>,
+    delegation: Option<String>,
+}
+
+fn browser_trust_grants(request: &super::envelope::BrowserTrust) -> Result<(Vec<u8>, Vec<Grant>)> {
+    use super::envelope::Cap;
+    let public = STANDARD.decode(&request.public_key)?;
+    ensure!(
+        request.compared && Alg::Es256.valid_public_key(&public) && key_id(&public) == request.kid,
+        "compare the exact browser key fingerprint before approving"
+    );
+    ensure!(
+        (1..=4).contains(&request.grants.len()),
+        "choose 1–4 permissions"
+    );
+    let grants = request
+        .grants
+        .iter()
+        .map(|name| {
+            let cap = Cap::parse(name).context("unknown browser trust permission")?;
+            ensure!(
+                matches!(
+                    cap,
+                    Cap::HistoryRead | Cap::SessionStart | Cap::SessionReopen | Cap::SessionWrite
+                ),
+                "this permission requires local approval"
+            );
+            Grant::parse(name)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    validate_enrollment(Kind::Owner, &request.label, &grants)?;
+    Ok((public, grants))
+}
+
+pub(in crate::commands::local_host) fn browser_trust(
+    dir: &Path,
+    settings: &Settings,
+    op: &super::envelope::Verified,
+) -> Result<Value> {
+    use super::envelope::{Cap, Operation, HOST_SCOPE};
+    use super::store::{current_grant, delegated_parent, same_authority};
+
+    let (webauthn, rp_id) = relying_party(settings)?;
+    let mut store = Store::open(dir)?;
+    let now = super::store::now_secs();
+    let parent = op
+        .dlg
+        .as_ref()
+        .map(|dlg| {
+            delegated_parent(
+                &store.conn,
+                &op.kid,
+                Cap::PasskeyManage,
+                HOST_SCOPE,
+                dlg,
+                now,
+            )?
+            .map_err(anyhow::Error::msg)
+        })
+        .transpose()?;
+    let signer = parent.as_deref().unwrap_or(&op.kid);
+    let opt_in = current_grant(
+        &store.conn,
+        signer,
+        Cap::BrowserTrust,
+        None,
+        op.dlg.is_some(),
+        None,
+    )?
+    .map_err(|_| anyhow::anyhow!("remote browser approvals are not enabled on this key"))?;
+    match &op.op {
+        Operation::BrowserTrustStart(request) => {
+            browser_trust_grants(request)?;
+            ensure!(store.still_admitted(op, now)?, "approval authority changed");
+            let mut approvers = Vec::new();
+            let mut approver_epochs = BTreeMap::new();
+            for (kid, passkey) in store.approved_passkeys(&rp_id)? {
+                if parent.as_ref().is_some_and(|parent| parent != &kid) {
+                    continue;
+                }
+                if let Ok(epoch) =
+                    current_grant(&store.conn, &kid, Cap::BrowserTrust, None, true, None)?
+                {
+                    approver_epochs.insert(kid, epoch);
+                    approvers.push(passkey);
+                }
+            }
+            ensure!(
+                !approvers.is_empty(),
+                "enable remote browser approvals on an approved passkey on this host"
+            );
+            let (options, state) = webauthn
+                .start_passkey_authentication(&approvers)
+                .map_err(|error| anyhow::anyhow!("cannot start approval verification: {error}"))?;
+            let challenge = hex_id()?;
+            let approval = BrowserTrustApproval {
+                request: request.clone(),
+                authority: op.admitted_under.clone(),
+                signer: op.kid.clone(),
+                opt_in,
+                approver_epochs,
+                delegation: op.dlg.clone(),
+            };
+            store.put_challenge(
+                &challenge,
+                BROWSER_TRUST,
+                &serde_json::to_string(&state)?,
+                &serde_json::to_string(&approval)?,
+                now,
+                DELEGATE_TTL_SECS,
+            )?;
+            Ok(serde_json::json!({ "challenge": challenge, "options": options }))
+        }
+        Operation::BrowserTrustFinish {
+            challenge,
+            response,
+        } => {
+            let (state, approval) = store.take_challenge(challenge, BROWSER_TRUST, now)?;
+            let approval: BrowserTrustApproval = serde_json::from_str(&approval)?;
+            ensure!(
+                approval.signer == op.kid
+                    && approval.delegation == op.dlg
+                    && approval.authority == op.admitted_under
+                    && approval.opt_in == opt_in,
+                "approval belongs to a different browser or its authority changed"
+            );
+            let assertion: PublicKeyCredential = serde_json::from_value(response.clone())?;
+            let result = webauthn
+                .finish_passkey_authentication(&assertion, &serde_json::from_str(&state)?)
+                .map_err(|error| anyhow::anyhow!("approval verification refused: {error}"))?;
+            ensure!(result.user_verified(), "user verification is required");
+
+            let approver = store
+                .approved_passkeys(&rp_id)?
+                .into_iter()
+                .find(|(_, passkey)| passkey.cred_id() == result.cred_id())
+                .map(|(kid, _)| kid)
+                .context("approving passkey is no longer active")?;
+            ensure!(
+                parent.as_ref().is_none_or(|parent| parent == &approver),
+                "approval must use the delegated passkey"
+            );
+            let (public, grants) = browser_trust_grants(&approval.request)?;
+            let tx = store
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            ensure!(
+                same_authority(&tx, op, super::store::now_secs())?,
+                "approval authority changed"
+            );
+            ensure!(
+                current_grant(
+                    &tx,
+                    signer,
+                    Cap::BrowserTrust,
+                    None,
+                    op.dlg.is_some(),
+                    Some(opt_in)
+                )?
+                .is_ok(),
+                "remote browser approval permission changed"
+            );
+            let epoch = approval
+                .approver_epochs
+                .get(&approver)
+                .copied()
+                .context("passkey was not eligible when approval started")?;
+            ensure!(
+                current_grant(&tx, &approver, Cap::BrowserTrust, None, true, Some(epoch))?.is_ok(),
+                "passkey approval permission changed"
+            );
+            for grant in &grants {
+                ensure!(
+                    holds_authority(&tx, &approver, grant.cap, None, true)?.is_none()
+                        && holds_authority(&tx, signer, grant.cap, None, op.dlg.is_some())?
+                            .is_none(),
+                    "approver lacks host-wide permission for {}",
+                    grant.cap.as_str()
+                );
+            }
+            let kid = Store::insert_credential(
+                &tx,
+                Kind::Owner,
+                Alg::Es256,
+                &public,
+                &approval.request.label,
+                &grants,
+            )?;
+            tx.commit()?;
+            Ok(serde_json::json!({ "kid": kid }))
+        }
+        _ => bail!("not a browser approval operation"),
     }
 }
 

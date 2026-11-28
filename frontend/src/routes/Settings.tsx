@@ -14,7 +14,7 @@ import { HostPairing } from "@/components/HostPairing";
 import { HostSetup } from "@/components/HostSetup";
 import { ConnectDevice } from "@/components/ConnectDevice";
 import { HostNetworkSettings } from "@/components/HostNetworkSettings";
-import { usePairedHosts } from "@/lib/hostPairing";
+import { isPinned, usePairedHosts } from "@/lib/hostPairing";
 import { hostControl } from "@/lib/hostControl";
 import type { HostLaunchSettings } from "@/lib/hostStatements";
 import { Input } from "@/components/ui/input";
@@ -602,6 +602,13 @@ export function Settings() {
                 <HostSetup active={activeSection === "access"} />
               </div>
             </Card>
+            {selectedHost && isPinned(selectedHost) && (
+              <Card>
+                <div className="p-5">
+                  <LocalHostTrust key={selectedHost.id} remoteHost={selectedHost} />
+                </div>
+              </Card>
+            )}
             <details
               className="rounded-xl border border-border bg-card p-5"
               onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}

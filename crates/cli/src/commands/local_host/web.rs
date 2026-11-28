@@ -678,6 +678,7 @@ pub(super) fn is_enrollable_owner_cap(cap: &str) -> bool {
             | "host.settings_read"
             | "host.settings_write"
             | "passkey.manage"
+            | "browser_trust.manage"
     )
 }
 
@@ -694,6 +695,7 @@ pub(super) fn is_owner_only_upgrade_cap(cap: &str) -> bool {
             | "host.settings_read"
             | "host.settings_write"
             | "passkey.manage"
+            | "browser_trust.manage"
     )
 }
 

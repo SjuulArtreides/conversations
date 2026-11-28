@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { KeyDirectoryUser, PublishedBrowserKey } from "@/lib/api";
+import { api, type KeyDirectoryUser, type PublishedBrowserKey } from "@/lib/api";
+import { hostControl } from "@/lib/hostControl";
 import { localRequest, useLocalHost } from "@/lib/localHost";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,7 +23,7 @@ interface LocalStatus {
 // `session.write` — the capability that lets a key drive a session's
 // terminal — also lets it refresh that session's linked pull requests.
 // There is no separate "Refresh pull-request status" checkbox.
-const permissions = [
+const browserPermissions = [
   ["history.read", "Read session history"],
   [
     "session.write",
@@ -30,11 +31,16 @@ const permissions = [
   ],
   ["session.start", "Start sessions"],
   ["session.reopen", "Reopen sessions"],
+] as const;
+
+const permissions = [
+  ...browserPermissions,
   ["session.pr_comment", "Post pull-request comments"],
   ["session.manage_sharing", "Share sessions with teammates"],
   ["host.settings_read", "Read host launch settings"],
   ["host.settings_write", "Change host launch settings"],
   ["passkey.manage", "Invite and approve session keys"],
+  ["browser_trust.manage", "Approve browser keys remotely with a passkey"],
 ] as const;
 
 const PERMISSION_LABELS: Record<string, string> = Object.fromEntries(
@@ -61,6 +67,7 @@ const OWNER_ONLY_CAPS = [
   "host.settings_read",
   "host.settings_write",
   "passkey.manage",
+  "browser_trust.manage",
 ] as const;
 
 function describeGrant(cap: string, session: string): string {
@@ -70,7 +77,7 @@ function describeGrant(cap: string, session: string): string {
 }
 
 /** Directory entries are candidates; only this owner's explicit comparison grants access. */
-export function LocalHostTrust() {
+export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; label: string } } = {}) {
   const host = useLocalHost();
   const cache = useQueryClient();
   const [addOpen, setAddOpen] = React.useState(false);
@@ -81,24 +88,24 @@ export function LocalHostTrust() {
   } | null>(null);
   const [label, setLabel] = React.useState("");
   const [compared, setCompared] = React.useState(false);
-  const [grants, setGrants] = React.useState<string[]>([
-    "history.read",
-    "session.pr_sync",
-  ]);
+  const [grants, setGrants] = React.useState<string[]>(["history.read"]);
+  const local = host.local && host.authenticated && !remoteHost;
   const searchInput = React.useRef<HTMLInputElement | null>(null);
 
   const status = useQuery({
     queryKey: ["local-host-status"],
     queryFn: () => localRequest<LocalStatus>("/api/status"),
-    enabled: host.local && host.authenticated,
+    enabled: local,
   });
   const directory = useQuery({
-    queryKey: ["local-host-directory", query],
+    queryKey: ["host-trust-directory", remoteHost?.id, query],
     queryFn: () =>
-      localRequest<{ users: KeyDirectoryUser[] }>(
-        `/api/users?q=${encodeURIComponent(query)}`,
-      ),
-    enabled: host.local && host.authenticated && addOpen,
+      remoteHost
+        ? api.userKeyDirectory(query).then((users) => ({ users }))
+        : localRequest<{ users: KeyDirectoryUser[] }>(
+            `/api/users?q=${encodeURIComponent(query)}`,
+          ),
+    enabled: (local || !!remoteHost) && addOpen,
     retry: false,
   });
   const trust = useMutation({
@@ -107,15 +114,17 @@ export function LocalHostTrust() {
         throw new Error(
           "Select and independently compare a key before trusting it.",
         );
+      const request = {
+        kid: selected.key.kid,
+        public_key: selected.key.public_key,
+        label: label.trim(),
+        compared: true,
+        grants,
+      };
+      if (remoteHost) return hostControl.trustPublishedBrowser(remoteHost.id, request);
       return localRequest<{ kid: string }>("/api/trust", {
         method: "POST",
-        body: JSON.stringify({
-          kid: selected.key.kid,
-          public_key: selected.key.public_key,
-          label: label.trim(),
-          compared: true,
-          grants,
-        }),
+        body: JSON.stringify(request),
       });
     },
     onSuccess: () => {
@@ -162,7 +171,7 @@ export function LocalHostTrust() {
     trust.reset();
   }
 
-  if (!host.local || !host.authenticated) return null;
+  if (!local && !remoteHost) return null;
 
   const candidates = (directory.data?.users ?? []).filter(
     (person) => person.keys.length > 0,
@@ -173,11 +182,12 @@ export function LocalHostTrust() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 id="local-trust-heading" className="text-lg font-semibold">
-            Access to this host
+            {remoteHost ? `Browser access to ${remoteHost.label}` : "Access to this host"}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            These are the browser keys you have approved on this laptop. Only
-            keys listed here can sign in to your host.
+            {remoteHost
+              ? "Compare a published browser key's fingerprint and verify with a passkey. Enable remote browser approvals in the machine's local Host access settings first."
+              : "These are the browser keys you have approved on this laptop. Only keys listed here can sign in to your host."}
           </p>
         </div>
         {!addOpen && (
@@ -345,7 +355,7 @@ export function LocalHostTrust() {
                 approve it below. Candidates with no published key are hidden.
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={closeAddPerson}>
+            <Button variant="ghost" size="sm" onClick={closeAddPerson} disabled={trust.isPending}>
               Cancel
             </Button>
           </div>
@@ -355,6 +365,7 @@ export function LocalHostTrust() {
             <Input
               ref={searchInput}
               value={query}
+              disabled={trust.isPending}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Name or email"
               maxLength={200}
@@ -442,7 +453,7 @@ export function LocalHostTrust() {
                 <legend className="mb-2 text-sm font-medium">
                   Permissions on this host
                 </legend>
-                {permissions.map(([cap, text]) => (
+                {(remoteHost ? browserPermissions : permissions).map(([cap, text]) => (
                   <label key={cap} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"

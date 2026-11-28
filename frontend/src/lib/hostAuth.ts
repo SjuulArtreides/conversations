@@ -245,6 +245,8 @@ export type OperationName =
   | "passkey.enroll_start"
   | "passkey.pending"
   | "passkey.approve"
+  | "browser_trust.start"
+  | "browser_trust.finish"
   | "passkey.vouch"
   | "peer.offer"
   | "history.get"

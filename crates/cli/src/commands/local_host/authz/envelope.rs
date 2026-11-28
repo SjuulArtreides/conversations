@@ -15,7 +15,7 @@ use conversations_core::{
     AgentKind, AgentLauncher,
 };
 use ring::{digest, signature};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const DOMAIN_OP: &[u8] = b"conversations-op/v1\n";
 /// Largest accepted decoded payload, and the largest accepted encoded field.
@@ -382,9 +382,13 @@ pub enum Operation {
     /// Host-scoped, owner-only: list the verified registrations waiting for
     /// approval — the key offers this host is holding.
     PasskeyPending,
-    /// Host-scoped, owner-only: approve one pending registration as a
-    /// permanent credential (UI-based local approval:
-    /// the host records the trust; the browser is a signed remote control).
+    /// Start or complete a fresh passkey assertion for one published key.
+    BrowserTrustStart(BrowserTrust),
+    BrowserTrustFinish {
+        challenge: String,
+        response: serde_json::Value,
+    },
+    /// Host-scoped, owner-only: approve a pending session registration.
     PasskeyApprove {
         cred_id: String,
     },
@@ -477,6 +481,8 @@ impl Operation {
             | Self::PasskeyEnrollStart { .. }
             | Self::PasskeyPending
             | Self::PasskeyApprove { .. }
+            | Self::BrowserTrustStart(_)
+            | Self::BrowserTrustFinish { .. }
             | Self::PasskeyVouch { .. } => HOST_SCOPE,
         }
     }
@@ -548,7 +554,9 @@ impl Operation {
             Self::SettingsUpdate { .. } => Cap::SettingsWrite,
             Self::PasskeyEnrollStart { .. }
             | Self::PasskeyPending
-            | Self::PasskeyApprove { .. } => Cap::PasskeyManage,
+            | Self::PasskeyApprove { .. }
+            | Self::BrowserTrustStart(_)
+            | Self::BrowserTrustFinish { .. } => Cap::PasskeyManage,
             Self::PasskeyVouch { .. } => Cap::SettingsRead,
         }
     }
@@ -604,6 +612,7 @@ pub enum Cap {
     /// any session capability must never be able to mint or approve additional
     /// credentials on this host.
     PasskeyManage,
+    BrowserTrust,
 }
 
 impl Cap {
@@ -619,6 +628,7 @@ impl Cap {
             Cap::SettingsRead => "host.settings_read",
             Cap::SettingsWrite => "host.settings_write",
             Cap::PasskeyManage => "passkey.manage",
+            Cap::BrowserTrust => "browser_trust.manage",
         }
     }
 
@@ -634,6 +644,7 @@ impl Cap {
             Cap::SettingsRead,
             Cap::SettingsWrite,
             Cap::PasskeyManage,
+            Cap::BrowserTrust,
         ]
         .into_iter()
         .find(|cap| cap.as_str() == value)
@@ -649,7 +660,7 @@ impl Cap {
     pub fn host_scoped(self) -> bool {
         matches!(
             self,
-            Cap::SettingsRead | Cap::SettingsWrite | Cap::PasskeyManage
+            Cap::SettingsRead | Cap::SettingsWrite | Cap::PasskeyManage | Cap::BrowserTrust
         )
     }
 
@@ -664,6 +675,7 @@ impl Cap {
                     | Cap::SettingsRead
                     | Cap::SettingsWrite
                     | Cap::PasskeyManage
+                    | Cap::BrowserTrust
             )
     }
 
@@ -1000,6 +1012,8 @@ pub fn channel_only(op: &str) -> bool {
             | "passkey.enroll_start"
             | "passkey.pending"
             | "passkey.approve"
+            | "browser_trust.start"
+            | "browser_trust.finish"
             | "passkey.vouch"
     )
 }
@@ -1029,6 +1043,23 @@ struct PasskeyEnrollStartArgs {
     label: String,
     kind: String,
     grants: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserTrust {
+    pub kid: String,
+    pub public_key: String,
+    pub label: String,
+    pub grants: Vec<String>,
+    pub compared: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserTrustFinishArgs {
+    challenge: String,
+    response: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -1879,6 +1910,21 @@ pub fn verify_as(
             let envelope: Envelope<NoArgs> = expect.envelope()?;
             check_host_scope(&envelope.sess)?;
             Ok(verified(envelope, frame, |_| Operation::PasskeyPending))
+        }
+        "browser_trust.start" => {
+            let envelope: Envelope<BrowserTrust> = expect.envelope()?;
+            check_host_scope(&envelope.sess)?;
+            Ok(verified(envelope, frame, Operation::BrowserTrustStart))
+        }
+        "browser_trust.finish" => {
+            let envelope: Envelope<BrowserTrustFinishArgs> = expect.envelope()?;
+            check_host_scope(&envelope.sess)?;
+            Ok(verified(envelope, frame, |args| {
+                Operation::BrowserTrustFinish {
+                    challenge: args.challenge,
+                    response: args.response,
+                }
+            }))
         }
         "passkey.approve" => {
             let envelope: Envelope<PasskeyApproveArgs> = expect.envelope()?;

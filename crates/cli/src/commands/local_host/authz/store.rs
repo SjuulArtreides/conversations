@@ -101,7 +101,7 @@ fn change_session_grants(
     Ok(None)
 }
 
-pub(super) const SCHEMA_VERSION: i64 = 15;
+pub(super) const SCHEMA_VERSION: i64 = 16;
 
 /// Minimum interval between automatic refreshes of one recorded PR target.
 /// A manual signed `pr.sync`, a newly recorded target, or an observed change
@@ -140,7 +140,7 @@ CREATE INDEX IF NOT EXISTS stream_frames_by_exp ON stream_frames(exp);
 -- Passkey ceremonies. A challenge row holds the library's opaque ceremony state
 -- and the IMMUTABLE request it was issued for; finishing takes only the row id.
 CREATE TABLE IF NOT EXISTS challenges(
-  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('enroll','delegate')),
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('enroll','delegate','browser_trust')),
   state TEXT NOT NULL, params TEXT NOT NULL,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER);
 -- Verified registrations awaiting LOCAL approval of the actual credential.
@@ -732,7 +732,11 @@ fn authority_rows(tx: &rusqlite::Transaction<'_>, parent: &str, op: &Verified) -
     ))?)
 }
 
-fn same_authority(tx: &rusqlite::Transaction<'_>, op: &Verified, now: i64) -> Result<bool> {
+pub(super) fn same_authority(
+    tx: &rusqlite::Transaction<'_>,
+    op: &Verified,
+    now: i64,
+) -> Result<bool> {
     let Some(admitted) = &op.admitted_under else {
         return Ok(false);
     };
@@ -880,6 +884,19 @@ impl Store {
             return Ok(());
         }
         tx.execute_batch(SCHEMA)?;
+        // Preserve outstanding and consumed enrollment and delegation challenges.
+        if version > 0 && version < 16 {
+            tx.execute_batch(
+                "ALTER TABLE challenges RENAME TO challenges_v15;
+                 CREATE TABLE challenges(
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('enroll','delegate','browser_trust')),
+  state TEXT NOT NULL, params TEXT NOT NULL,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER);
+                 INSERT INTO challenges SELECT id, kind, state, params, created_at, expires_at, consumed_at
+                     FROM challenges_v15;
+                 DROP TABLE challenges_v15;",
+            )?;
+        }
         // v1 journals had no operation kind; their only operation was a start.
         let has_cap: bool = tx
             .prepare("SELECT 1 FROM pragma_table_info('op_journal') WHERE name = 'cap'")?
@@ -1062,6 +1079,22 @@ impl Store {
         label: &str,
         grants: &[Grant],
     ) -> Result<String> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cred_id = Self::insert_credential(&tx, kind, alg, public_key, label, grants)?;
+        tx.commit()?;
+        Ok(cred_id)
+    }
+
+    pub(super) fn insert_credential(
+        tx: &rusqlite::Transaction<'_>,
+        kind: Kind,
+        alg: Alg,
+        public_key: &[u8],
+        label: &str,
+        grants: &[Grant],
+    ) -> Result<String> {
         ensure!(
             alg.valid_public_key(public_key),
             "public key is not a valid {} key",
@@ -1073,9 +1106,6 @@ impl Store {
         ceiling.sort_unstable();
         ceiling.dedup();
         let now = now_secs();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
             "INSERT OR IGNORE INTO credentials(cred_id, kind, alg, public_key, label, ceiling, approved_at)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -1095,7 +1125,6 @@ impl Store {
                 ],
             )?;
         }
-        tx.commit()?;
         Ok(cred_id)
     }
 
