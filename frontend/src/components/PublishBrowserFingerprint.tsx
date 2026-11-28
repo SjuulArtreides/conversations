@@ -31,8 +31,8 @@ export function PublishBrowserFingerprint() {
           </code>
           <p className="text-muted-foreground">
             On your machine, open local Conversations and go to Settings →
-            Host access. Under Waiting for approval, choose Compare and trust
-            on this fingerprint, compare it, and choose Trust public key. This
+            Host access. Under Waiting for approval, check that the
+            fingerprint there matches the one above and choose Approve. This
             browser connects on its own once the machine approves it.
           </p>
         </>

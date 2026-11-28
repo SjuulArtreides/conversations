@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils";
 import { LocalHostTrust } from "./LocalHostTrust";
@@ -349,7 +349,7 @@ it("submits only the compared published key and selected permissions for the cho
 });
 
 describe("browser keys waiting for approval", () => {
-  it("lists your account's unapproved keys and trusts one only after you compare it", async () => {
+  it("lists your account's unapproved fingerprints and approves one with full access in a single click", async () => {
     const user = userEvent.setup();
     const base = vi.mocked(localRequest).getMockImplementation()!;
     vi.mocked(localRequest).mockImplementation(async (path, init) => {
@@ -367,19 +367,8 @@ describe("browser keys waiting for approval", () => {
       expect.anything(),
     );
 
-    await user.click(screen.getByRole("button", { name: "Compare and trust" }));
-    const trust = screen.getByRole("button", { name: "Trust this device" });
-    expect(trust).toBeDisabled();
-    // Your own browser gets full access: no permission checklist to work through.
-    expect(
-      screen.queryByRole("checkbox", { name: "Read session history" }),
-    ).not.toBeInTheDocument();
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: /independently compared this exact fingerprint/,
-      }),
-    );
-    await user.click(trust);
+    // One click: the fingerprint is on screen and the key is your own.
+    await user.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() =>
       expect(localRequest).toHaveBeenCalledWith(
@@ -410,6 +399,9 @@ describe("browser keys waiting for approval", () => {
         "session.start",
         "session.write",
       ],
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      `Approved ${first.label}`,
     );
   });
 
@@ -459,6 +451,33 @@ describe("browser keys waiting for approval", () => {
         "browser_trust.manage",
       ],
     });
+  });
+
+  it("attaches an Approve failure to the row it came from, not the Add person panel", async () => {
+    const user = userEvent.setup();
+    const base = vi.mocked(localRequest).getMockImplementation()!;
+    vi.mocked(localRequest).mockImplementation(async (path, init) => {
+      if (path === "/api/waiting-keys")
+        return { email: "me@example.com", keys: [first, second] } as never;
+      if (path === "/api/trust")
+        throw new Error("This key is already enrolled.");
+      return base(path, init);
+    });
+    renderWithProviders(<LocalHostTrust />);
+    const firstRow = (
+      await screen.findAllByText(first.kid)
+    )[0].closest("li")!;
+    const secondRow = screen.getAllByText(second.kid)[0].closest("li")!;
+    await user.click(
+      within(firstRow).getByRole("button", { name: "Approve" }),
+    );
+    const alert = await within(firstRow).findByRole("alert");
+    expect(alert).toHaveTextContent("already enrolled");
+    expect(within(secondRow).queryByRole("alert")).not.toBeInTheDocument();
+    // The Add person panel was never opened, so no leaked alert there.
+    expect(
+      screen.queryByText("Public key trusted with the selected permissions."),
+    ).not.toBeInTheDocument();
   });
 
   it("shows nothing extra when every published key is already approved", async () => {
