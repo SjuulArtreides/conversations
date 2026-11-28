@@ -56,6 +56,8 @@ someone else access to your host, follow the
 
 To delegate work to another agent or exchange messages between sessions, see
 [handoffs and agent-to-agent communication](docs/agent-handoffs-and-messaging.md).
+To let your own machines control each other, pair them once: see
+[Pair your own machines](docs/pair-your-machines.md).
 
 The CLI executable is `conversations`. Its configuration and data
 directories keep their existing `arrakis-conversations` names, so existing

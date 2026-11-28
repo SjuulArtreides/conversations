@@ -170,6 +170,11 @@ your sessions, project peers and sessions shared for communication. A
 connected result does not prove that its agent is consuming messages, and
 discovery grants no transcript or terminal access.
 
+**Between your own machines**, pair them instead: see
+[Pair your own machines](pair-your-machines.md). Agents on paired machines
+can then message every session on each other with no per-session steps.
+The steps below are for sessions on someone else's machine.
+
 For a message from **A to B**:
 
 1. A's machine supplies its agent signing **public** key.

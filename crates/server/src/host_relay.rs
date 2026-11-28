@@ -35,7 +35,8 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use conversations_core::host_relay::{
-    valid_host_id, RelayAnswer, RelayEnvelope, RelayReply, RelayRequest, REQUEST_TIMEOUT_SECS,
+    valid_host_id, RelayAnswer, RelayEnvelope, RelayReply, RelayRequest, Signed,
+    REQUEST_TIMEOUT_SECS,
 };
 use futures::Stream;
 use serde_json::json;
@@ -61,6 +62,9 @@ struct Channel {
     owner: String,
     /// The public key the attachment proved possession of (id = its SHA-256).
     public: String,
+    /// The machine card the host presented, opaque here (the reader verifies it
+    /// against the identity key it trusts).
+    card: Option<Signed>,
     /// Required on replies; known only to whoever holds the proven stream.
     token: String,
     to_host: mpsc::Sender<RelayEnvelope>,
@@ -234,6 +238,7 @@ impl HostRelay {
         owner: &str,
         host_id: &str,
         public: &str,
+        card: Option<Signed>,
     ) -> Result<(HostStream, String), RelayError> {
         let key = host_id.to_owned();
         let mut inner = self.inner.lock().expect("host relay mutex poisoned");
@@ -260,6 +265,7 @@ impl HostRelay {
                 generation,
                 owner: owner.to_owned(),
                 public: public.to_owned(),
+                card,
                 token: token.clone(),
                 to_host,
                 pending: HashMap::new(),
@@ -276,16 +282,20 @@ impl HostRelay {
         ))
     }
 
-    /// The hosts `owner` has attached right now, as `(id, public key)`.
-    pub fn attached_by(&self, owner: &str) -> Vec<(String, String)> {
+    /// The hosts `owner` has attached right now: id, public key and card.
+    pub fn attached_by(&self, owner: &str) -> Vec<AttachedHost> {
         let inner = self.inner.lock().expect("host relay mutex poisoned");
         let mut hosts: Vec<_> = inner
             .hosts
             .iter()
             .filter(|(_, channel)| channel.owner == owner)
-            .map(|(id, channel)| (id.clone(), channel.public.clone()))
+            .map(|(id, channel)| AttachedHost {
+                id: id.clone(),
+                key: channel.public.clone(),
+                card: channel.card.clone(),
+            })
             .collect();
-        hosts.sort();
+        hosts.sort_by(|a, b| a.id.cmp(&b.id));
         hosts
     }
 
@@ -407,6 +417,36 @@ pub struct AttachParams {
     #[serde(rename = "pub")]
     public: String,
     sig: String,
+    /// The host's machine card (payload and signature, base64url). Optional:
+    /// older hosts attach without one.
+    card_p: Option<String>,
+    card_s: Option<String>,
+}
+
+/// A host the caller's account has attached, as `GET /api/host-relay` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AttachedHost {
+    pub id: String,
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub card: Option<Signed>,
+}
+
+/// A presented card, if it is well-formed base64url within the size limit.
+/// Its signature is not checked here: the server is not trusted with it.
+fn presented_card(p: Option<String>, s: Option<String>) -> Result<Option<Signed>, RelayError> {
+    use conversations_core::host_relay::MAX_MACHINE_CARD_BYTES;
+    let (Some(p), Some(s)) = (p, s) else {
+        return Ok(None);
+    };
+    let base64url = |v: &str| {
+        v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    if p.len() + s.len() > MAX_MACHINE_CARD_BYTES || !base64url(&p) || !base64url(&s) {
+        return Err(RelayError::BadRequest("invalid machine card"));
+    }
+    Ok(Some(Signed { p, s }))
 }
 
 /// `POST /api/host-relay/{host_id}/challenge`: a one-time nonce to sign.
@@ -446,9 +486,11 @@ pub async fn stream(
     if !fresh || !proves_host(&host_id, &proof.public, &proof.nonce, &proof.sig) {
         return Err(RelayError::BadRequest("host identity proof failed"));
     }
-    let (mut host, token) = state
-        .host_relay
-        .attach(&owner_of(viewer), &host_id, &proof.public)?;
+    let card = presented_card(proof.card_p, proof.card_s)?;
+    let (mut host, token) =
+        state
+            .host_relay
+            .attach(&owner_of(viewer), &host_id, &proof.public, card)?;
     let (tx, rx) = mpsc::channel::<Event>(QUEUE);
     let first = serde_json::json!({"type": "attached", "reply_token": token}).to_string();
     let _ = tx.send(Event::default().data(first)).await;
@@ -522,10 +564,11 @@ pub async fn status(
     })))
 }
 
-/// `GET /api/host-relay` -> `{ "hosts": [{ "id", "key" }] }`: the hosts the
-/// caller's own account has attached. Each key was proven at attach time. A
-/// browser uses this only to find which of its account's machines to ask
-/// whether they approved its key; the host's signed answer decides.
+/// `GET /api/host-relay` -> `{ "hosts": [{ "id", "key", "card"? }] }`: the
+/// hosts the caller's own account has attached. Each key was proven at attach
+/// time; a card is passed through unchecked. A browser uses this to find which
+/// of its account's machines to ask whether they approved its key, and a host
+/// to offer its owner the machines to pair; signatures and the owner decide.
 pub async fn attached(
     State(state): State<AppState>,
     CurrentUser(viewer): CurrentUser,
@@ -537,7 +580,7 @@ pub async fn attached(
         .host_relay
         .attached_by(&owner_of(viewer))
         .into_iter()
-        .map(|(id, key)| json!({ "id": id, "key": key }))
+        .map(|host| json!(host))
         .collect();
     Json(json!({ "hosts": hosts }))
 }

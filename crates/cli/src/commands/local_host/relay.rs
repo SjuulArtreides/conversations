@@ -71,17 +71,25 @@ pub(super) async fn consume(host: &Arc<Host>, host_id: &str) -> Result<()> {
         .as_str()
         .context("relay gave no challenge")?
         .to_owned();
-    let (public, sig) = {
+    let (public, sig, card) = {
         let (dir, nonce) = (host.dir.clone(), nonce.clone());
-        tokio::task::spawn_blocking(move || authz::attest::attach_proof(&dir, &nonce)).await??
+        tokio::task::spawn_blocking(move || -> Result<_> {
+            let (public, sig) = authz::attest::attach_proof(&dir, &nonce)?;
+            Ok((
+                public,
+                sig,
+                crate::commands::local_host::machines::card(&dir)?,
+            ))
+        })
+        .await??
     };
     let response = host
         .auth(
             host.client
                 // hex and base64url only: nothing here needs escaping.
                 .get(format!(
-                    "{}/api/host-relay/{host_id}/stream?nonce={nonce}&pub={public}&sig={sig}",
-                    host.server
+                    "{}/api/host-relay/{host_id}/stream?nonce={nonce}&pub={public}&sig={sig}&card_p={}&card_s={}",
+                    host.server, card.p, card.s
                 )),
         )
         .send()

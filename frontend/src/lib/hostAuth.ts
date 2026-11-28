@@ -248,6 +248,8 @@ export type OperationName =
   | "browser_trust.start"
   | "browser_trust.finish"
   | "passkey.vouch"
+  | "machine.pair"
+  | "machine.unpair"
   | "peer.offer"
   | "history.get"
   | "history.fragment"

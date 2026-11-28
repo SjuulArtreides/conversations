@@ -187,6 +187,8 @@ pub fn finish(dir: &Path, op: &Verified, outcome: &Result<()>) -> Result<()> {
                 | Operation::SessionsList { .. }
                 | Operation::HistorySearch { .. } => "read",
                 Operation::SettingsUpdate { .. } => "updated",
+                Operation::MachinePair { .. } => "paired",
+                Operation::MachineUnpair => "unpaired",
                 _ => "started",
             }),
         ),

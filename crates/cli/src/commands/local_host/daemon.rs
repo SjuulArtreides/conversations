@@ -3074,6 +3074,14 @@ pub(super) async fn execute_signed(
         } => passkey_vouch_signed(host, &op, for_host, challenge, cred_id)
             .await
             .map(|vouch| status_detail = Some(vouch)),
+        authz::envelope::Operation::MachinePair { host_key, card } => {
+            machine_pair_signed(host, &op, host_key, card)
+                .await
+                .map(|label| status_detail = Some(label))
+        }
+        authz::envelope::Operation::MachineUnpair => machine_unpair_signed(host, &op)
+            .await
+            .map(|label| status_detail = Some(label)),
         // Applied inside admission, handled as input-class frames above, or
         // refused before admission (private reads).
         authz::envelope::Operation::GrantAdd { .. }
@@ -3772,6 +3780,106 @@ async fn passkey_approve_signed(
         )?),
         other => bail!("unexpected approve answer: {other:?}"),
     }
+}
+
+/// Pair another of the owner's machines from a signed `machine.pair`. Only a
+/// key that holds full control here, directly, may: the machine receives
+/// exactly that. A pairing the owner signed (not passed on by a paired machine)
+/// is passed on to the other paired machines; a paired machine introducing
+/// itself asks this machine to pass it on.
+async fn machine_pair_signed(
+    host: &Host,
+    op: &authz::envelope::Verified,
+    host_key: &str,
+    card: &conversations_core::host_relay::Signed,
+) -> Result<String> {
+    use super::machines;
+    enum Next {
+        Nothing,
+        AfterOwner,
+        Spread,
+    }
+    let (dir, verified, host_key, signed) = (
+        host.dir.clone(),
+        op.clone(),
+        host_key.to_owned(),
+        card.clone(),
+    );
+    let (card, next) = tokio::task::spawn_blocking(move || -> Result<(machines::Card, Next)> {
+        authz::dispatch::begin(&dir, &verified)?;
+        let store = authz::store::Store::open(&dir)?;
+        ensure!(
+            verified.dlg.is_none() && store.holds_full_control(&verified.kid)?,
+            "only a key with full control on this machine can pair another machine"
+        );
+        let key =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &host_key)?;
+        let card = machines::verify_card(&key, &signed)?;
+        let signer = store
+            .paired_machines()?
+            .into_iter()
+            .find(|m| m.agent_kid == verified.kid);
+        drop(store);
+        if signer.as_ref().is_some_and(|m| m.host_id == card.host_id) {
+            return Ok((card, Next::Spread));
+        }
+        machines::pair_card(&dir, &card)?;
+        Ok((
+            card,
+            if signer.is_none() {
+                Next::AfterOwner
+            } else {
+                Next::Nothing
+            },
+        ))
+    })
+    .await??;
+    if !matches!(next, Next::Nothing) {
+        let (client, server, cookie, dir, card) = (
+            host.client.clone(),
+            host.server.clone(),
+            host.cookie.clone(),
+            host.dir.clone(),
+            card.clone(),
+        );
+        tokio::spawn(async move {
+            let net = machines::Net {
+                http: &client,
+                server: &server,
+                cookie: cookie.as_deref(),
+            };
+            let results = match next {
+                Next::AfterOwner => machines::after_owner_pairing(&net, &dir, &card).await,
+                _ => machines::spread(&net, &dir, &card).await,
+            };
+            for result in results {
+                eprintln!("Machine pairing: {}: {}", result.machine, result.outcome);
+            }
+        });
+    }
+    Ok(card.label)
+}
+
+/// The signing machine unpaired this one: drop its pairing here too, then
+/// interrupt the work its authority started.
+async fn machine_unpair_signed(host: &Host, op: &authz::envelope::Verified) -> Result<String> {
+    let (dir, verified) = (host.dir.clone(), op.clone());
+    let label = tokio::task::spawn_blocking(move || -> Result<String> {
+        authz::dispatch::begin(&dir, &verified)?;
+        let mut store = authz::store::Store::open(&dir)?;
+        let machine = store
+            .paired_machines()?
+            .into_iter()
+            .find(|m| m.agent_kid == verified.kid)
+            .context("the signer is not a paired machine")?;
+        store.unpair_machine(&machine.host_id, authz::store::now_secs())?;
+        Ok(machine.label)
+    })
+    .await??;
+    if let Err(error) = host.interrupt_revoked().await {
+        eprintln!("Unpaired {label}, but interrupting its work failed: {error:#}");
+    }
+    Ok(label)
 }
 
 /// Sign one enrollment-ceremony vouch with THIS host's identity key for a

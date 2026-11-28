@@ -212,6 +212,7 @@ impl MessagingClient {
             link::source_registered(&self.local_dir, &self.session).await?,
             "this session is not registered with the local host; messages are signed only for managed sessions"
         );
+        self.route_to_paired_machine(&target).await;
         let now = super::local_host::authz::store::now_secs;
         let begin = link::begin_send(
             &self.local_dir,
@@ -253,6 +254,59 @@ impl MessagingClient {
                 }
             }
         }
+    }
+
+    /// A recipient not pinned here is routed to the paired machine the server
+    /// says runs it. The claim chooses only among machines the owner paired, so
+    /// a false one reaches another of the owner's machines, which refuses a
+    /// session it does not have. Best effort: without a route the send reports
+    /// the recipient as not paired.
+    async fn route_to_paired_machine(&self, target: &str) {
+        use super::local_host::authz::{self, store::Store};
+        let dir = self.local_dir.clone();
+        let target_owned = target.to_owned();
+        let pinned = tokio::task::spawn_blocking(move || -> Result<bool> {
+            authz::ensure_dir(&dir)?;
+            let store = Store::open(&dir)?;
+            Ok(store.target(&target_owned)?.is_some() || store.paired_machines()?.is_empty())
+        })
+        .await;
+        if !matches!(pinned, Ok(Ok(false))) {
+            return;
+        }
+        let Ok(mut url) = self.origin.join("api/sessions/") else {
+            return;
+        };
+        url.path_segments_mut()
+            .map(|mut s| {
+                s.pop_if_empty().push(target);
+            })
+            .ok();
+        let mut request = self.http.get(url);
+        if let Some(cookie) = &self.cookie {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let Ok(response) = request.send().await else {
+            return;
+        };
+        let Ok(session) = response.json::<Value>().await else {
+            return;
+        };
+        let Some(host_id) = session["publication"]["host_id"]
+            .as_str()
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let (dir, target) = (self.local_dir.clone(), target.to_owned());
+        let _ = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut store = Store::open(&dir)?;
+            if let Some(machine) = store.paired_machine(&host_id)? {
+                store.target_add(&target, &machine.host_id, &machine.host_key, &machine.label)?;
+            }
+            Ok(())
+        })
+        .await;
     }
 
     /// Send one prepared (already signed, already stored) request to its pinned

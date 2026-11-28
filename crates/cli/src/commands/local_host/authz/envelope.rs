@@ -404,6 +404,18 @@ pub enum Operation {
         challenge: String,
         cred_id: String,
     },
+    /// Host-scoped: pair another of the owner's machines here with full
+    /// control. `host_key` is the machine's identity key, vouched for by the
+    /// signer, and `card` the statement it signed naming its agent key. Only a
+    /// key that itself holds full control here may sign it (checked at the
+    /// effect): a browser of the owner, or an already paired machine.
+    MachinePair {
+        host_key: String,
+        card: conversations_core::host_relay::Signed,
+    },
+    /// Host-scoped: the signing machine unpaired this machine; drop it here
+    /// too. Affects only the signer's own pairing.
+    MachineUnpair,
 }
 
 /// The complete, typed launch configuration a signed settings update carries.
@@ -483,7 +495,9 @@ impl Operation {
             | Self::PasskeyApprove { .. }
             | Self::BrowserTrustStart(_)
             | Self::BrowserTrustFinish { .. }
-            | Self::PasskeyVouch { .. } => HOST_SCOPE,
+            | Self::PasskeyVouch { .. }
+            | Self::MachinePair { .. }
+            | Self::MachineUnpair => HOST_SCOPE,
         }
     }
 
@@ -558,6 +572,8 @@ impl Operation {
             | Self::BrowserTrustStart(_)
             | Self::BrowserTrustFinish { .. } => Cap::PasskeyManage,
             Self::PasskeyVouch { .. } => Cap::SettingsRead,
+            Self::MachinePair { .. } => Cap::BrowserTrust,
+            Self::MachineUnpair => Cap::SettingsRead,
         }
     }
 
@@ -1015,6 +1031,8 @@ pub fn channel_only(op: &str) -> bool {
             | "browser_trust.start"
             | "browser_trust.finish"
             | "passkey.vouch"
+            | "machine.pair"
+            | "machine.unpair"
     )
 }
 
@@ -1066,6 +1084,13 @@ struct BrowserTrustFinishArgs {
 #[serde(deny_unknown_fields)]
 struct PasskeyApproveArgs {
     cred_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MachinePairArgs {
+    host_key: String,
+    card: conversations_core::host_relay::Signed,
 }
 
 #[derive(Deserialize)]
@@ -1948,6 +1973,29 @@ pub fn verify_as(
                 challenge: a.challenge,
                 cred_id: a.cred_id,
             }))
+        }
+        "machine.pair" => {
+            use conversations_core::host_relay::MAX_MACHINE_CARD_BYTES;
+            let envelope: Envelope<MachinePairArgs> = expect.envelope()?;
+            check_host_scope(&envelope.sess)?;
+            let args = &envelope.args;
+            let key_ok = base64::Engine::decode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                &args.host_key,
+            )
+            .is_ok_and(|k| k.len() == 32);
+            if !key_ok || args.card.p.len() + args.card.s.len() > MAX_MACHINE_CARD_BYTES {
+                return Err(Reject::Malformed("machine".into()));
+            }
+            Ok(verified(envelope, frame, |a| Operation::MachinePair {
+                host_key: a.host_key,
+                card: a.card,
+            }))
+        }
+        "machine.unpair" => {
+            let envelope: Envelope<NoArgs> = expect.envelope()?;
+            check_host_scope(&envelope.sess)?;
+            Ok(verified(envelope, frame, |_| Operation::MachineUnpair))
         }
         "settings.update" => {
             let envelope: Envelope<SettingsUpdateArgs> = expect.envelope()?;
