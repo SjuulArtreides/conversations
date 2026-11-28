@@ -3450,6 +3450,7 @@ async fn handoff_local(
             },
         )?;
         ensure!(recorded, "a local record for this session already exists");
+        authz::store::Store::open(&host.dir)?.link_handoff(source, &child)?;
         if let Some(model) = &model {
             authz::store::Store::open(&host.dir)?.set_handoff_model(&child, model)?;
         }

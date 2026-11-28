@@ -42,7 +42,7 @@ differs from your shell.
 
 | Agent | Integration |
 | --- | --- |
-| Claude | Configure a user MCP entry named `conversations` with `mcp serve --delivery claude`. The managed interactive launcher recognizes it and requests the Conversations channel. Approve Claude's native channel confirmation when prompted; organization policy must permit channels. |
+| Claude | Configure a user MCP entry named `conversations` with `mcp serve --delivery claude`. The managed interactive launcher recognizes it, runs it from the host's own executable against the host's server (so an entry that names an older install still works), and requests the Conversations channel. Approve Claude's native channel confirmation when prompted; organization policy must permit channels. |
 | Codex | The managed launcher supplies a launch-scoped Conversations MCP registration and binds it to the native thread. Remote/daemon-bypass modes and explicit custom configuration can change that setup. |
 | OpenCode | Configure the MCP process with `mcp serve --session-context opencode`, then install the personal delivery plugin with `conversations mcp install --agent opencode` and reopen the wrapped terminal. The plugin requires OpenCode 2.0.27 or newer. |
 
@@ -139,8 +139,11 @@ child. There is no separate task-completed event in this tool.
 
 Have the child report its result explicitly. A useful brief states its
 scope, whether it may edit files, the checks it must run, and how to report
-completion. Peer messaging needs the trust setup below; starting a handoff
-does not replace that setup.
+completion. A handoff child and its source can message each other right
+away: starting the handoff pins both sessions on this machine and approves
+the machine's own agent key for exactly those two sessions. If you revoked
+that agent key, it stays revoked and their messages are refused. Any other
+pair of sessions needs the trust setup below.
 
 When the work is finished, review the result before assigning more work. If
 you use a one-task-at-a-time workflow, wait for the child's completed turn
@@ -216,7 +219,8 @@ An agent credential cannot start arbitrary sessions on the recipient host.
 For **B to reply to A**, repeat the setup in reverse: approve B's machine
 agent key on A for A's session, then pin A as a peer on B. Two sessions on
 the same machine still need their destinations pinned and the machine
-agent key approved for the permitted sessions.
+agent key approved for the permitted sessions, unless one is the other's
+handoff child.
 
 If a key is already enrolled without the required grants, do not assume
 adding the same key widens its permissions. Ask the local owner to inspect

@@ -4456,8 +4456,12 @@ mod write {
 
     /// Terminals behind both sessions, registered on `host` like live wrappers.
     fn register(host: &Host) -> (mpsc::Receiver<ServerMessage>, mpsc::Receiver<ServerMessage>) {
-        let mut terminals = Vec::new();
-        for id in [A, B] {
+        (register_session(host, A), register_session(host, B))
+    }
+
+    /// Register `id` with `host` as a running local Claude session.
+    fn register_session(host: &Host, id: &str) -> mpsc::Receiver<ServerMessage> {
+        {
             let (commands, rx) = mpsc::channel(64);
             host.sessions.lock().unwrap().insert(
                 id.into(),
@@ -4488,11 +4492,8 @@ mod write {
                     pid: None,
                 },
             );
-            terminals.push(rx);
+            rx
         }
-        let b = terminals.pop().unwrap();
-        let a = terminals.pop().unwrap();
-        (a, b)
     }
 
     impl World {
@@ -5769,6 +5770,103 @@ exit 0
                 .is_err());
             assert_eq!(sender.fixture.launches(), 1);
             let _ = (&mut sterm.a, &mut sterm.b);
+        });
+    }
+
+    #[test]
+    fn a_handoff_child_and_its_source_message_each_other_without_manual_pairing() {
+        if !isolated(
+            "write::a_handoff_child_and_its_source_message_each_other_without_manual_pairing",
+        ) {
+            return;
+        }
+        use crate::commands::messaging::MessagingClient;
+        runtime().block_on(async {
+            let (machine, _unused) = world();
+            let (host, _terminals) = arc_host(&machine);
+            serve_socket(machine.dir(), host.clone());
+            {
+                let host = host.clone();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        let ids: Vec<String> = host.pending.lock().unwrap().keys().cloned().collect();
+                        for id in ids {
+                            if let Some(tx) = host.pending.lock().unwrap().remove(&id) {
+                                let _ = tx.send(());
+                            }
+                        }
+                    }
+                });
+            }
+            loopback_private_channel(machine.dir());
+            let relay = Arc::new(Relay {
+                routes: Mutex::new(HashMap::from([(machine.host_id.clone(), host.clone())])),
+                ..Default::default()
+            });
+            let central = relay_stub(relay.clone()).await;
+            let client = |session: &str| {
+                MessagingClient::with_cookie(&central, session, Some("conversations.sid=x".into()))
+                    .unwrap()
+                    .with_local_dir(machine.dir().to_path_buf())
+            };
+            let source = client(B);
+            let handoff = source
+                .request(reqwest::Method::POST, &["handoffs"], Some(json!({"brief": "write a poem", "idempotency_key": "poem", "agent": "claude"})))
+                .await
+                .unwrap();
+            assert_eq!(handoff["status"], "started", "{handoff}");
+            let child_id = handoff["session_id"].as_str().unwrap().to_owned();
+            let _child_terminal = register_session(&host, &child_id);
+            let child = client(&child_id);
+
+            // The child reports back to the session that handed off.
+            let report = child
+                .request(reqwest::Method::POST, &["messages"], Some(send_body(B, "Handshake: a poem", "report")))
+                .await
+                .map_err(|e| format!("{e:#}"))
+                .unwrap();
+            assert_eq!(report["status"], "queued", "{report}");
+            let rows = inbox_of(machine.dir(), B);
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            assert_eq!((rows[0].text.as_str(), rows[0].source_session.as_str()), ("Handshake: a poem", child_id.as_str()));
+
+            // And the source can answer its child.
+            let reply = source
+                .request(reqwest::Method::POST, &["messages"], Some(send_body(&child_id, "thanks", "thanks")))
+                .await
+                .map_err(|e| format!("{e:#}"))
+                .unwrap();
+            assert_eq!(reply["status"], "queued", "{reply}");
+            assert_eq!(inbox_of(machine.dir(), &child_id).len(), 1);
+
+            // Only the pair is linked: an unrelated local session stays unpaired.
+            let unrelated = child
+                .request(reqwest::Method::POST, &["messages"], Some(send_body(A, "hi", "stranger")))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(unrelated.contains("not paired"), "{unrelated}");
+            assert!(inbox_of(machine.dir(), A).is_empty());
+
+            // A revoked agent credential is not resurrected by a later handoff.
+            Store::open(machine.dir()).unwrap().connection()
+                .execute("UPDATE credentials SET revoked_at = 1 WHERE kind = 'agent'", []).unwrap();
+            let second = source
+                .request(reqwest::Method::POST, &["handoffs"], Some(json!({"brief": "another poem", "idempotency_key": "poem-2", "agent": "claude"})))
+                .await
+                .unwrap();
+            let second_id = second["session_id"].as_str().unwrap().to_owned();
+            let _second_terminal = register_session(&host, &second_id);
+            let refused = format!(
+                "{:#}",
+                client(&second_id)
+                    .request(reqwest::Method::POST, &["messages"], Some(send_body(B, "again", "again")))
+                    .await
+                    .unwrap_err()
+            );
+            assert!(refused.contains("refused"), "{refused}");
+            assert_eq!(inbox_of(machine.dir(), B).len(), 0, "a revoked key's messages are withheld");
         });
     }
 

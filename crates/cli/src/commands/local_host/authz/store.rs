@@ -2715,6 +2715,76 @@ impl Store {
         Ok(Ok(()))
     }
 
+    /// Let a same-machine handoff child and its source message each other: pin
+    /// both sessions to this host and grant this host's own agent key
+    /// `session.write` on each. That key never leaves this machine, so this
+    /// grants nothing a local process could not already do. A revoked agent
+    /// credential or grant stays revoked.
+    pub fn link_handoff(&mut self, source: &str, child: &str) -> Result<()> {
+        let host_key = self.host_public_key()?;
+        let host_id = key_id(&host_key);
+        let (_, agent_public) = self.agent_key()?;
+        let agent_id = key_id(&agent_public);
+        let now = now_secs();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for (session, label) in [(source, "Handoff source"), (child, "Handoff child")] {
+            tx.execute(
+                "INSERT OR IGNORE INTO agent_targets(session_id, host_id, host_key, label, added_at) VALUES(?1, ?2, ?3, ?4, ?5)",
+                params![session, host_id, host_key, label, now],
+            )?;
+        }
+        let credential: Option<(String, String, Option<i64>)> = tx
+            .query_row(
+                "SELECT kind, ceiling, revoked_at FROM credentials WHERE cred_id = ?1",
+                params![agent_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let grants = [source, child].map(|session| Grant {
+            cap: Cap::SessionWrite,
+            session: Some(session.to_owned()),
+            ceiling_only: false,
+        });
+        match credential {
+            None => {
+                Self::insert_credential(
+                    &tx,
+                    Kind::Agent,
+                    Alg::Ed25519,
+                    &agent_public,
+                    "This machine's agents",
+                    &grants,
+                )?;
+            }
+            Some((kind, ceiling, None)) if Kind::parse(&kind) == Some(Kind::Agent) => {
+                if !ceiling
+                    .split(',')
+                    .any(|cap| cap == Cap::SessionWrite.as_str())
+                {
+                    let mut caps: Vec<&str> =
+                        ceiling.split(',').filter(|c| !c.is_empty()).collect();
+                    caps.push(Cap::SessionWrite.as_str());
+                    caps.sort_unstable();
+                    tx.execute(
+                        "UPDATE credentials SET ceiling = ?2 WHERE cred_id = ?1",
+                        params![agent_id, caps.join(",")],
+                    )?;
+                }
+                for session in [source, child] {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO grants(cred_id, session_id, cap, granted_at) VALUES(?1, ?2, ?3, ?4)",
+                        params![agent_id, session, Cap::SessionWrite.as_str(), now],
+                    )?;
+                }
+            }
+            Some(_) => {}
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn handoff_child_state(&self, source: &str, child: &str) -> Result<Option<String>> {
         Ok(self
             .conn

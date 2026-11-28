@@ -547,7 +547,7 @@ async fn run_with(
     let mut command = agent_command(&launch);
     let mut args = launch.command[1..].to_vec();
     let _codex_binding = super::codex::prepare(&launch, &mut args, server)?;
-    super::super::claude_channel::prepare(&launch.command[0], &mut args)?;
+    super::super::claude_channel::prepare(&launch.command[0], &mut args, server)?;
     super::readiness::prepare_claude(dir, &launch, &mut args)?;
     if let Some(endpoint) = _codex_binding
         .as_ref()
