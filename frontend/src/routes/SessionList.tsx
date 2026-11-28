@@ -219,16 +219,17 @@ function SessionCollection({ local }: { local: boolean }) {
       <SessionCollectionHeader />
       {!local && !collections.length && (
         <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
-          <h2 className="font-semibold">Connect a machine</h2>
+          <h2 className="font-semibold">Set up this browser</h2>
           <p className="mt-1 text-muted-foreground">
-            Connect your machine in Settings, then approve this browser on that
-            machine to see your private sessions.
+            Already using Conversations on another browser? Open Settings → Host
+            access there, copy the setup link, and open it in this browser.
+            Then approve this browser’s fingerprint on your machine.
           </p>
           <Link
             to="/settings"
             className="mt-3 inline-block rounded-md border border-border px-3 py-1.5 hover:bg-accent"
           >
-            Set up access
+            Set up a machine
           </Link>
         </div>
       )}
