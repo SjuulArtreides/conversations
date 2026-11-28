@@ -2415,6 +2415,136 @@ mod passkey {
     }
 
     #[test]
+    fn browser_trust_requires_opt_in_and_a_fresh_assertion() {
+        let name = "passkey::browser_trust_requires_opt_in_and_a_fresh_assertion";
+        if !isolated(name) {
+            return;
+        }
+        use super::authz::envelope::{key_id, test_signing::Signer, DOMAIN_OP};
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        use conversations_core::host_relay::OpStatus;
+        use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+
+        configure();
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = Fixture::new(dir.path());
+        rt().block_on(async {
+            let mut passkey = SoftPasskey::new(true);
+            approved(&fixture, &mut passkey, &["browser_trust.manage", "passkey.manage", "history.read"]).await;
+            let signer = Signer::new();
+            let (signer_kid, host_id) = authz::enroll_from_cli(
+                dir.path(), "owner", "ed25519", &STANDARD.encode(&signer.public),
+                "Owner browser", &["passkey.manage".into(), "history.read".into()],
+            ).unwrap();
+            let host = fixture.host(fixture.server());
+            let rng = ring::rand::SystemRandom::new();
+            let pair = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+            let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pair.as_ref(), &rng).unwrap();
+            let public = pair.public_key().as_ref();
+            let mut request = json!({
+                "kid": key_id(public), "public_key": STANDARD.encode(public),
+                "label": "Recipient", "grants": ["history.read"], "compared": true,
+            });
+            let sign = |op, args: &Value, counter| {
+                let now = now_secs();
+                signer.sign_bytes(signer.op_payload(
+                    &host_id, op, "host", &args.to_string(), &format!("{counter:032x}"), now, now + 60,
+                ).as_bytes())
+            };
+            assert_ne!(execute_signed(&host, sign("browser_trust.start", &request, 1)).await.0, OpStatus::Executed);
+            Store::open(dir.path()).unwrap().grant_owner_only_caps(
+                &signer_kid, &[super::authz::envelope::Cap::BrowserTrust],
+            ).unwrap();
+
+            request["grants"] = json!(["browser_trust.manage"]);
+            assert_ne!(execute_signed(&host, sign("browser_trust.start", &request, 2)).await.0, OpStatus::Executed);
+            request["grants"] = json!(["history.read"]);
+            request["compared"] = json!(false);
+            assert_ne!(execute_signed(&host, sign("browser_trust.start", &request, 12)).await.0, OpStatus::Executed);
+            request["compared"] = json!(true);
+            request["kid"] = json!("A".repeat(43));
+            assert_ne!(execute_signed(&host, sign("browser_trust.start", &request, 13)).await.0, OpStatus::Executed);
+            request["kid"] = json!(key_id(public));
+            let start = sign("browser_trust.start", &request, 3);
+            assert_eq!(dispatch_signed(&host, start.clone()).await.0, OpStatus::Refused);
+            let (status, detail) = execute_signed(&host, start).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            let started: Value = serde_json::from_str(&detail.unwrap()).unwrap();
+            assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM credentials WHERE label = 'Recipient'"), 0);
+            let finish = json!({
+                "challenge": started["challenge"],
+                "response": assert_(&mut passkey, ORIGIN, started["options"].clone()).unwrap(),
+            });
+            let (status, detail) = execute_signed(&host, sign("browser_trust.finish", &finish, 4)).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            assert_eq!(serde_json::from_str::<Value>(&detail.unwrap()).unwrap()["kid"], request["kid"]);
+            assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM credentials WHERE label = 'Recipient' AND ceiling = 'history.read'"), 1);
+            assert_ne!(execute_signed(&host, sign("browser_trust.finish", &finish, 5)).await.0, OpStatus::Executed);
+
+            let next = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+            let next = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, next.as_ref(), &rng).unwrap();
+            let next = next.public_key().as_ref();
+            request["kid"] = json!(key_id(next));
+            request["public_key"] = json!(STANDARD.encode(next));
+            request["label"] = json!("Second recipient");
+            let (status, detail) = execute_signed(&host, sign("browser_trust.start", &request, 6)).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            let started: Value = serde_json::from_str(&detail.unwrap()).unwrap();
+            let mismatched = json!({"challenge": started["challenge"], "response": finish["response"]});
+            assert_ne!(execute_signed(&host, sign("browser_trust.finish", &mismatched, 7)).await.0, OpStatus::Executed);
+
+            let (status, detail) = execute_signed(&host, sign("browser_trust.start", &request, 8)).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            let started: Value = serde_json::from_str(&detail.unwrap()).unwrap();
+            let after_revocation = json!({
+                "challenge": started["challenge"],
+                "response": assert_(&mut passkey, ORIGIN, started["options"].clone()).unwrap(),
+            });
+            Store::open(dir.path()).unwrap().revoke_credential(&signer_kid, now_secs()).unwrap();
+            assert_eq!(execute_signed(&host, sign("browser_trust.finish", &after_revocation, 9)).await.0, OpStatus::Refused);
+            assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM credentials WHERE label = 'Second recipient'"), 0);
+
+            // The same ceremony works from an already-unlocked browser, but
+            // unlocking the browser was not itself approval of this key.
+            let dlg = "00112233445566778899aabbccddeeff";
+            let (challenge, options) = self::started(call(&fixture, PasskeyRequest::DelegateStart {
+                browser_pub: STANDARD.encode(public),
+                dlg: dlg.into(),
+                caps: vec!["passkey.manage".into(), "history.read".into()],
+                nonce: "0123456789abcdef0123456789abcdef".into(),
+            }).await.unwrap());
+            let response = assert_(&mut passkey, ORIGIN, options).unwrap();
+            let PasskeyResponse::Delegated { .. } = call(&fixture, PasskeyRequest::DelegateFinish {
+                challenge, response,
+            }).await.unwrap() else { panic!("browser did not unlock") };
+            let sign_delegated = |op, args: &Value, counter| {
+                let now = now_secs();
+                let kid = key_id(public);
+                let payload = serde_json::to_vec(&json!({
+                    "v": 1, "typ": "op", "aud": host_id, "kid": kid,
+                    "dlg": dlg, "op": op, "sess": "host",
+                    "jti": format!("{counter:032x}"), "iat": now, "exp": now + 60,
+                    "args": args,
+                })).unwrap();
+                let mut message = DOMAIN_OP.to_vec();
+                message.extend_from_slice(&payload);
+                SignedFrame { payload, sig: pair.sign(&rng, &message).unwrap().as_ref().to_vec(), kid }
+            };
+            let (status, detail) = execute_signed(&host, sign_delegated("browser_trust.start", &request, 10)).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            let started: Value = serde_json::from_str(&detail.unwrap()).unwrap();
+            assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM credentials WHERE label = 'Second recipient'"), 0);
+            let finish = json!({
+                "challenge": started["challenge"],
+                "response": assert_(&mut passkey, ORIGIN, started["options"].clone()).unwrap(),
+            });
+            let (status, detail) = execute_signed(&host, sign_delegated("browser_trust.finish", &finish, 11)).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM credentials WHERE label = 'Second recipient' AND ceiling = 'history.read'"), 1);
+        });
+    }
+
+    #[test]
     fn enrollment_needs_local_approval_and_rejects_bad_ceremonies() {
         let name = "passkey::enrollment_needs_local_approval_and_rejects_bad_ceremonies";
         if !isolated(name) {

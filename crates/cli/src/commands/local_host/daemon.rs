@@ -3047,6 +3047,21 @@ pub(super) async fn execute_signed(
         authz::envelope::Operation::PasskeyPending => passkey_pending_signed(host, &op)
             .await
             .map(|pending| status_detail = Some(pending)),
+        authz::envelope::Operation::BrowserTrustStart(_)
+        | authz::envelope::Operation::BrowserTrustFinish { .. } => {
+            let dir = host.dir.clone();
+            let op = op.clone();
+            tokio::task::spawn_blocking(move || {
+                authz::dispatch::begin(&dir, &op)?;
+                let settings = super::settings::Settings::load(&dir)?;
+                let value = authz::passkey::browser_trust(&dir, &settings, &op)?;
+                Ok(serde_json::to_string(&value)?)
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result)
+            .map(|detail| status_detail = Some(detail))
+        }
         authz::envelope::Operation::PasskeyApprove { cred_id } => {
             passkey_approve_signed(host, &op, cred_id)
                 .await

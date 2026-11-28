@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils";
 import { LocalHostTrust } from "./LocalHostTrust";
 import { localRequest, useLocalHost } from "@/lib/localHost";
+import { api } from "@/lib/api";
+import { hostControl } from "@/lib/hostControl";
 
 vi.mock("@/lib/localHost", () => ({
   localRequest: vi.fn(),
@@ -12,7 +14,7 @@ vi.mock("@/lib/localHost", () => ({
 const first = {
   kid: "A".repeat(43),
   public_key: "BBDifferentFirstPublicKey==",
-  alg: "es256",
+  alg: "es256" as const,
   label: "Alice browser",
   created_at: "2026-11-05T10:00:00Z",
 };
@@ -316,4 +318,30 @@ describe("local host trust in shared Settings", () => {
     await waitFor(() => expect(localRequest).not.toHaveBeenCalled());
     expect(screen.queryByText("Access to this host")).not.toBeInTheDocument();
   });
+});
+
+it("submits only the compared published key and selected permissions for the chosen remote host", async () => {
+  vi.mocked(useLocalHost).mockReturnValue({ local: false, authenticated: false, error: null });
+  const lookup = vi.spyOn(api, "userKeyDirectory").mockResolvedValue(directory.users);
+  const trust = vi.spyOn(hostControl, "trustPublishedBrowser").mockResolvedValue({ kid: first.kid });
+  try {
+    const user = userEvent.setup();
+    renderWithProviders(<LocalHostTrust remoteHost={{ id: "mac", label: "Macbook" }} />);
+    await chooseFirst(user);
+    expect(localRequest).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Browser access to Macbook" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Approve browser keys remotely with a passkey" })).not.toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Trust public key" });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: /independently compared/ }));
+    await user.click(submit);
+    expect(trust).toHaveBeenCalledWith("mac", {
+      kid: first.kid, public_key: first.public_key,
+      label: "alice@example.com: Alice browser", compared: true,
+      grants: ["history.read"],
+    });
+  } finally {
+    lookup.mockRestore();
+    trust.mockRestore();
+  }
 });

@@ -1209,6 +1209,35 @@ export const hostControl = {
     });
   },
 
+  async trustPublishedBrowser(
+    hostId: string,
+    request: {
+      kid: string;
+      public_key: string;
+      label: string;
+      grants: string[];
+      compared: boolean;
+    },
+  ): Promise<{ kid: string }> {
+    const started = JSON.parse(
+      (await channelOperation(hostId, "browser_trust.start", HOST_SCOPE, request)) ?? "null",
+    );
+    if (typeof started?.challenge !== "string" || !started.options) {
+      throw new HostControlError("The host did not return an approval challenge.", "refused");
+    }
+    const response = await getPasskeyAssertion(started.options);
+    const approved = JSON.parse(
+      (await channelOperation(hostId, "browser_trust.finish", HOST_SCOPE, {
+        challenge: started.challenge,
+        response,
+      }, undefined, false)) ?? "null",
+    );
+    if (approved?.kid !== request.kid) {
+      throw new HostControlError("The host did not confirm the selected browser key.", "refused");
+    }
+    return { kid: request.kid };
+  },
+
   /**
    * Publish this session's local history to `audience`, or change who may
    * read it. Only the host that publishes it can do this (`hostId` comes from

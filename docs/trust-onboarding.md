@@ -234,6 +234,25 @@ fingerprint you approved.
 *16. Both browsers approved; the other person's fingerprint is under Key
 details.*
 
+### Approve a browser from the hosted app
+
+To enable hosted approval, open **Settings → Host access** on the machine that
+will grant access. Use **Add a device** to enroll an owner passkey if you need
+one. Under **Add permissions**, enable **Approve browser keys
+remotely with a passkey** on the owner passkey you will use to verify approvals.
+Use an owner passkey with **Invite and approve session keys** if you unlock
+the hosted app with that passkey. If you just added that permission, unlock
+the hosted app again. If you connect using a directly approved
+browser key, enable both permissions on that browser key as well. The
+approving passkey and browser must each hold the access you want to give.
+
+In the hosted app, select that machine in **Settings → Host access** and
+choose **Add person**. Find the recipient's published key by name or email,
+compare the full fingerprint with them, and choose the permissions. Select
+**Trust public key** and complete the passkey prompt. The host checks the
+permission again before it saves the key. The prompt expires after two
+minutes. Administrative permissions still require local approval.
+
 ### What they can now do
 
 Their setup page re-checks the approval on its own.
