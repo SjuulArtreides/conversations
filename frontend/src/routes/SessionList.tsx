@@ -30,6 +30,7 @@ import {
 import { SessionCollectionToolbar } from "@/components/SessionCollectionToolbar";
 import { DEFAULT_SORT, type SortOrder } from "@/components/SortControl";
 import { SessionCard } from "@/components/SessionCard";
+import { PublishBrowserFingerprint } from "@/components/PublishBrowserFingerprint";
 import { ScopeTabs } from "@/components/ScopeTabs";
 import { StartNewSessionButton } from "@/components/HostActions";
 import { EmptyState, ErrorState, Spinner } from "@/components/states";
@@ -221,10 +222,11 @@ function SessionCollection({ local }: { local: boolean }) {
         <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
           <h2 className="font-semibold">Set up this browser</h2>
           <p className="mt-1 text-muted-foreground">
-            Already using Conversations on another browser? Open Settings → Host
-            access there, copy the setup link, and open it in this browser.
-            Then approve this browser’s fingerprint on your machine.
+            {user
+              ? "Already have a machine running Conversations? Publish this browser’s fingerprint so you can approve it on that machine."
+              : "Connect to a machine to see your private sessions."}
           </p>
+          {user && <PublishBrowserFingerprint />}
           <Link
             to="/settings"
             className="mt-3 inline-block rounded-md border border-border px-3 py-1.5 hover:bg-accent"

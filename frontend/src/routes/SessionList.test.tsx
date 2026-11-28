@@ -8,6 +8,7 @@ import type { Summary, Visibility } from "@/lib/types";
 import { SessionList } from "./SessionList";
 import { PrivateSessionTabs } from "@/components/LiveTabs";
 import type { PrivateChannel } from "@/lib/privateChannel";
+import { loadBrowserKey } from "@/lib/hostAuth";
 import { activeHost } from "@/lib/hostPairing";
 
 function summary(
@@ -41,6 +42,9 @@ const SESSIONS = [
 vi.mock("@/lib/api", () => ({
   api: {
     listSessions: vi.fn(),
+    userKeyDirectory: vi.fn().mockResolvedValue([]),
+    browserKeyChallenge: vi.fn(),
+    publishBrowserKey: vi.fn(),
     listProjects: vi.fn().mockResolvedValue([]),
     liveSessions: vi.fn().mockResolvedValue([]),
     getUserSettings: vi.fn().mockResolvedValue({
@@ -405,17 +409,46 @@ it("coalesces an eligible private copy by UUID without changing remote-only scop
   ).not.toBeInTheDocument();
 });
 
-it("offers one setup entry even when shared sessions exist", async () => {
+it("publishes the browser fingerprint from Sessions without pairing a host", async () => {
   const { activeHost, unpairHost } = await import("@/lib/hostPairing");
   while (activeHost()) unpairHost(activeHost()!.id);
+  const key = await loadBrowserKey();
+  const challenge = "a".repeat(32);
+  vi.mocked(api.browserKeyChallenge).mockImplementation(async (public_key, label) => ({
+    challenge,
+    payload: JSON.stringify({
+      v: 1,
+      purpose: "publish_browser_key",
+      user_email: "me@x.com",
+      public_key,
+      kid: key.kid,
+      label,
+      challenge,
+      expires_at: Math.floor(Date.now() / 1000) + 300,
+    }),
+  }));
+  vi.mocked(api.publishBrowserKey).mockImplementation(async () => ({
+    key: {
+      kid: key.kid,
+      alg: "es256",
+      public_key: "published",
+      label: "My browser",
+      created_at: "2026-11-28",
+    },
+  }));
   renderWithProviders(<SessionList />);
   expect(await screen.findByText("mine-1")).toBeVisible();
   expect(
     screen.getByRole("heading", { name: "Set up this browser" }),
   ).toBeVisible();
-  expect(
-    screen.getByText(/approve this browser’s fingerprint on your machine/),
-  ).toBeVisible();
+  const publish = screen.getByRole("button", { name: "Publish my fingerprint" });
+  expect(api.publishBrowserKey).not.toHaveBeenCalled();
+  await waitFor(() => expect(publish).toBeEnabled());
+  await userEvent.click(publish);
+  expect(await screen.findByText("Fingerprint published.")).toBeVisible();
+  expect(screen.getByText(key.kid)).toBeVisible();
+  expect(api.publishBrowserKey).toHaveBeenCalledWith(challenge, expect.any(String));
+  expect(activeHost()).toBeNull();
   expect(screen.getByRole("link", { name: "Set up a machine" })).toHaveAttribute(
     "href",
     "/settings",
