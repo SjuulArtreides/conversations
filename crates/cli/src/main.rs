@@ -76,6 +76,8 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         Command::Credential(credential_args) => commands::local_host::credential(credential_args),
         #[cfg(unix)]
+        Command::Machine(machine_args) => commands::local_host::machine(&args.global, machine_args),
+        #[cfg(unix)]
         Command::Passkey(passkey_args) => commands::local_host::passkey(&args.global, passkey_args),
         #[cfg(unix)]
         Command::History(history_args) => commands::local_host::history(&args.global, history_args),

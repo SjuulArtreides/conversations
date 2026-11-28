@@ -79,6 +79,9 @@ pub enum Command {
     /// Locally approved credentials that may sign remote operations for this host.
     #[cfg(unix)]
     Credential(crate::commands::local_host::CredentialArgs),
+    /// Pair your own machines: a paired machine has full control of this one.
+    #[cfg(unix)]
+    Machine(crate::commands::local_host::MachineArgs),
     /// Passkey enrollment and browser delegation, performed by the running host
     /// over its owner-only socket.
     #[cfg(unix)]

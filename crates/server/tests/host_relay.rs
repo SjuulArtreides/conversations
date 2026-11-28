@@ -385,6 +385,58 @@ async fn an_account_lists_only_the_hosts_it_attached_with_their_proven_keys() {
 }
 
 #[tokio::test]
+async fn a_hosts_machine_card_is_listed_to_its_own_account_unchanged_and_a_malformed_one_is_refused(
+) {
+    let server = server().await;
+    let key = HostKey::new();
+    let attach = |card: String| {
+        let server = &server;
+        let key = &key;
+        async move {
+            let nonce = challenge(server, key, "bob@x").await;
+            server
+                .http
+                .get(format!(
+                    "{}/api/host-relay/{}/stream?nonce={nonce}&pub={}&sig={}&{card}",
+                    server.base,
+                    key.id,
+                    key.public,
+                    key.sign(&nonce)
+                ))
+                .header("x-demo-user", "bob@x")
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        attach("card_p=not+base64url&card_s=x".into())
+            .await
+            .status(),
+        400
+    );
+    let oversized = "a".repeat(2000);
+    assert_eq!(
+        attach(format!("card_p={oversized}&card_s=x"))
+            .await
+            .status(),
+        400
+    );
+
+    let response = attach("card_p=eyJ2IjoxfQ&card_s=c2ln".into()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        attached(&server, "bob@x").await,
+        json!({ "hosts": [{
+            "id": key.id, "key": key.public,
+            "card": { "p": "eyJ2IjoxfQ", "s": "c2ln" },
+        }] })
+    );
+    assert_eq!(attached(&server, "alice@y").await, json!({ "hosts": [] }));
+    drop(response);
+}
+
+#[tokio::test]
 async fn offline_timeout_replacement_and_overload_fail_honestly() {
     let server = server().await;
     let key = HostKey::new();

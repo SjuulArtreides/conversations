@@ -160,6 +160,28 @@ pub struct VouchProof {
     pub host_key: String,
 }
 
+/// A machine card: signed by a host's identity key (over [`HOST_DOMAIN`]), it
+/// names the agent key that host signs operations with and the machine's
+/// name. A host presents it when it attaches; the relay lists it, opaque, to
+/// the same account. It grants nothing by itself: a machine is trusted only
+/// once its owner pairs it, and the card is checked against the identity key
+/// the human compared (or the browser already pinned).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MachineCard {
+    pub v: u8,
+    /// Fixed: `machine_card`.
+    pub typ: String,
+    /// The signing host's id (`base64url(SHA-256(identity key))`).
+    pub host: String,
+    /// base64url raw Ed25519 agent public key.
+    pub agent_key: String,
+    pub label: String,
+}
+
+/// Longest machine card a host may present (payload + signature, base64url).
+pub const MAX_MACHINE_CARD_BYTES: usize = 1024;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RelayReply {

@@ -101,7 +101,7 @@ fn change_session_grants(
     Ok(None)
 }
 
-pub(super) const SCHEMA_VERSION: i64 = 16;
+pub(super) const SCHEMA_VERSION: i64 = 17;
 
 /// Minimum interval between automatic refreshes of one recorded PR target.
 /// A manual signed `pr.sync`, a newly recorded target, or an observed change
@@ -227,6 +227,13 @@ CREATE TABLE IF NOT EXISTS agent_handoffs(
 -- One-use challenges for private channel offers. A challenge is consumed by the
 -- first offer that names it, whatever the outcome, and every open challenge is
 -- consumed when the host starts: none survives a restart.
+-- Machines of the same owner, paired by the owner here (locally, or by a
+-- signed `machine.pair` from a key with full control). The machine's agent key
+-- is an owner credential with full control on this host while it is paired;
+-- unpairing revokes that credential and keeps the row (`unpaired_at`).
+CREATE TABLE IF NOT EXISTS paired_machines(
+  host_id TEXT PRIMARY KEY, host_key BLOB NOT NULL, agent_kid TEXT NOT NULL,
+  label TEXT NOT NULL, paired_at INTEGER NOT NULL, unpaired_at INTEGER);
 CREATE TABLE IF NOT EXISTS peer_challenges(
   id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
   consumed_at INTEGER, kid TEXT, offer_sha256 BLOB);
@@ -239,6 +246,43 @@ const MAX_OPEN_PEER_CHALLENGES: i64 = 16;
 
 /// Host-wide scope marker in `grants.session_id`.
 pub const ANY_SESSION: &str = "*";
+
+/// What a paired machine holds here, host-wide: everything its owner can do.
+pub const FULL_CONTROL: [Cap; 10] = [
+    Cap::HistoryRead,
+    Cap::SessionWrite,
+    Cap::SessionStart,
+    Cap::SessionReopen,
+    Cap::SessionManageSharing,
+    Cap::PrComment,
+    Cap::SettingsRead,
+    Cap::SettingsWrite,
+    Cap::PasskeyManage,
+    Cap::BrowserTrust,
+];
+
+/// A machine name as shown and stored: printable, at most 64 characters.
+pub fn machine_label(label: &str) -> String {
+    let label: String = conversations_core::host_relay::clean_text(label.trim())
+        .chars()
+        .take(64)
+        .collect();
+    if label.trim().is_empty() {
+        "Unnamed machine".to_owned()
+    } else {
+        label.trim().to_owned()
+    }
+}
+
+/// One machine paired on this host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairedMachine {
+    pub host_id: String,
+    pub host_key: Vec<u8>,
+    pub agent_kid: String,
+    pub label: String,
+    pub paired_at: i64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -2713,6 +2757,172 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(Ok(()))
+    }
+
+    /// Pair one of the owner's machines: its agent key becomes an owner
+    /// credential with [`FULL_CONTROL`] here, host-wide, so every session,
+    /// including ones started later, is reachable without another approval.
+    /// The caller has authenticated `host_key` (the owner compared it, or a key
+    /// with full control here vouched for it) and verified that it signed the
+    /// card naming `agent_key`. Pairing again after an unpair reinstates the
+    /// credential with new grant activations: work queued under the earlier
+    /// pairing never revives. Returns the machine's credential id.
+    pub fn pair_machine(
+        &mut self,
+        host_key: &[u8],
+        agent_key: &[u8],
+        label: &str,
+        now: i64,
+    ) -> Result<String> {
+        ensure!(
+            Alg::Ed25519.valid_public_key(host_key) && Alg::Ed25519.valid_public_key(agent_key),
+            "machine keys must be Ed25519"
+        );
+        let host_id = key_id(host_key);
+        ensure!(host_id != self.host_id()?, "this is this machine");
+        let own_agent = key_id(&self.agent_key()?.1);
+        let cred_id = key_id(agent_key);
+        ensure!(cred_id != own_agent, "that is this machine's own agent key");
+        let label = machine_label(label);
+        let full: Vec<&str> = FULL_CONTROL.iter().map(|c| c.as_str()).collect();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT alg, ceiling FROM credentials WHERE cred_id = ?1",
+                params![cred_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let credential_label = format!("Machine: {label}");
+        match existing {
+            None => {
+                let grants: Vec<Grant> = FULL_CONTROL
+                    .iter()
+                    .map(|cap| Grant {
+                        cap: *cap,
+                        session: None,
+                        ceiling_only: false,
+                    })
+                    .collect();
+                Self::insert_credential(
+                    &tx,
+                    Kind::Owner,
+                    Alg::Ed25519,
+                    agent_key,
+                    &credential_label,
+                    &grants,
+                )?;
+            }
+            Some((alg, ceiling)) => {
+                ensure!(
+                    alg == Alg::Ed25519.as_str(),
+                    "that key is enrolled here with another algorithm"
+                );
+                let mut caps: std::collections::BTreeSet<String> = ceiling
+                    .split(',')
+                    .filter(|c| !c.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                caps.extend(full.iter().map(|c| (*c).to_owned()));
+                let ceiling = caps.into_iter().collect::<Vec<_>>().join(",");
+                tx.execute(
+                    "UPDATE credentials SET kind = 'owner', ceiling = ?2, label = ?3, revoked_at = NULL
+                     WHERE cred_id = ?1",
+                    params![cred_id, ceiling, credential_label],
+                )?;
+                for cap in &full {
+                    tx.execute(
+                        "INSERT INTO grants(cred_id, session_id, cap, granted_at) VALUES(?1, ?2, ?3, ?4)
+                         ON CONFLICT(cred_id, session_id, cap) DO UPDATE SET revoked_at = NULL,
+                           granted_at = excluded.granted_at
+                         WHERE grants.revoked_at IS NOT NULL",
+                        params![cred_id, ANY_SESSION, cap, now],
+                    )?;
+                }
+            }
+        }
+        // A machine re-paired with a new agent key loses the old key's authority.
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT agent_kid FROM paired_machines WHERE host_id = ?1 AND unpaired_at IS NULL",
+                params![host_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous.filter(|p| *p != cred_id) {
+            tx.execute(
+                "UPDATE credentials SET revoked_at = ?2 WHERE cred_id = ?1 AND revoked_at IS NULL",
+                params![previous, now],
+            )?;
+            tx.execute(
+                "UPDATE grants SET revoked_at = ?2 WHERE cred_id = ?1 AND revoked_at IS NULL",
+                params![previous, now],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO paired_machines(host_id, host_key, agent_kid, label, paired_at, unpaired_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, NULL)
+             ON CONFLICT(host_id) DO UPDATE SET host_key = excluded.host_key,
+               agent_kid = excluded.agent_kid, label = excluded.label,
+               paired_at = excluded.paired_at, unpaired_at = NULL",
+            params![host_id, host_key, cred_id, label, now],
+        )?;
+        tx.commit()?;
+        Ok(cred_id)
+    }
+
+    /// The machines paired here now, by label.
+    pub fn paired_machines(&self) -> Result<Vec<PairedMachine>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT host_id, host_key, agent_kid, label, paired_at FROM paired_machines
+             WHERE unpaired_at IS NULL ORDER BY label, host_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(PairedMachine {
+                host_id: r.get(0)?,
+                host_key: r.get(1)?,
+                agent_kid: r.get(2)?,
+                label: r.get(3)?,
+                paired_at: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The paired machine `host_id`, if it is paired now.
+    pub fn paired_machine(&self, host_id: &str) -> Result<Option<PairedMachine>> {
+        Ok(self
+            .paired_machines()?
+            .into_iter()
+            .find(|m| m.host_id == host_id))
+    }
+
+    /// Unpair `host_id`: revoke its credential (as `credential revoke` does)
+    /// and mark the row. `None` when it was not paired.
+    pub fn unpair_machine(&mut self, host_id: &str, now: i64) -> Result<Option<Revocation>> {
+        let Some(machine) = self.paired_machine(host_id)? else {
+            return Ok(None);
+        };
+        let revoked = self.revoke_credential(&machine.agent_kid, now)?;
+        self.conn.execute(
+            "UPDATE paired_machines SET unpaired_at = ?2 WHERE host_id = ?1 AND unpaired_at IS NULL",
+            params![host_id, now],
+        )?;
+        Ok(Some(revoked))
+    }
+
+    /// Whether `kid` holds every [`FULL_CONTROL`] capability here, host-wide,
+    /// directly (never through a delegation): only such a key may pair another
+    /// machine, which receives exactly that.
+    pub fn holds_full_control(&self, kid: &str) -> Result<bool> {
+        for cap in FULL_CONTROL {
+            if current_grant(&self.conn, kid, cap, None, false, None)?.is_err() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Let a same-machine handoff child and its source message each other: pin

@@ -120,12 +120,26 @@ fn sign_op(
     jti: &str,
     now: i64,
 ) -> Result<(String, Vec<u8>, Vec<u8>)> {
+    sign_op_for(store, host_id, target, op, args, jti, now, 60)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sign_op_for(
+    store: &mut Store,
+    host_id: &str,
+    target: &str,
+    op: &str,
+    args: serde_json::Value,
+    jti: &str,
+    now: i64,
+    lifetime: i64,
+) -> Result<(String, Vec<u8>, Vec<u8>)> {
     let (pkcs8, public) = store.agent_key()?;
     let kid = key_id(&public);
     let payload = serde_json::to_vec(&serde_json::json!({
         "v": 1, "typ": "op", "aud": host_id, "kid": kid, "dlg": null,
         "op": op, "sess": target, "jti": jti,
-        "iat": now, "exp": now + 60, "args": args,
+        "iat": now, "exp": now + lifetime, "args": args,
     }))?;
     let pair = signature::Ed25519KeyPair::from_pkcs8(&pkcs8)
         .map_err(|_| anyhow::anyhow!("agent key is unreadable"))?;
@@ -151,6 +165,40 @@ pub(super) fn sign_peer_offer(
         &uuid::Uuid::new_v4().simple().to_string(),
         authz::store::now_secs(),
     )
+}
+
+/// Any operation for the host `host_key` (pinned by the caller), signed with
+/// this machine's agent key and ready for `private_peer::exchange`. What it may
+/// do there is decided by that host: for a paired machine, everything its owner
+/// can. Stream frames (`session.input`) need a `lifetime` of at most 30 s.
+pub fn prepare_op(
+    dir: &Path,
+    host_key: &[u8],
+    sess: &str,
+    op: &str,
+    args: serde_json::Value,
+    lifetime: i64,
+) -> Result<Prepared> {
+    let host_id = key_id(host_key);
+    let jti = uuid::Uuid::new_v4().simple().to_string();
+    let (kid, payload, sig) = sign_op_for(
+        &mut open(dir)?,
+        &host_id,
+        sess,
+        op,
+        args,
+        &jti,
+        authz::store::now_secs(),
+        lifetime,
+    )?;
+    Ok(Prepared {
+        message_id: jti,
+        host_id,
+        host_key: host_key.to_vec(),
+        kid,
+        payload,
+        sig,
+    })
 }
 
 /// States the recipient host vouches for once it has admitted a message.

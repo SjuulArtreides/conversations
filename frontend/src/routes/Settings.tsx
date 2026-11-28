@@ -8,6 +8,8 @@ import {
 } from "@/lib/useAuth";
 import { DeviceSetup } from "@/components/DeviceSetup";
 import { LocalHostTrust } from "@/components/LocalHostTrust";
+import { LocalMachines } from "@/components/LocalMachines";
+import { PairMyMachines } from "@/components/PairMyMachines";
 import { LOCAL_HOST_ID, localRequest, useLocalHost } from "@/lib/localHost";
 import { BrowserKeyDirectory } from "@/components/BrowserKeyDirectory";
 import { HostPairing } from "@/components/HostPairing";
@@ -591,6 +593,11 @@ export function Settings() {
             </Card>
             <Card>
               <div className="p-5">
+                <LocalMachines />
+              </div>
+            </Card>
+            <Card>
+              <div className="p-5">
                 <LocalHostTrust />
               </div>
             </Card>
@@ -602,10 +609,20 @@ export function Settings() {
                 <HostSetup active={activeSection === "access"} />
               </div>
             </Card>
+            {pairing.hosts.filter(isPinned).length >= 2 && (
+              <Card>
+                <div className="p-5">
+                  <PairMyMachines />
+                </div>
+              </Card>
+            )}
             {selectedHost && isPinned(selectedHost) && (
               <Card>
                 <div className="p-5">
-                  <LocalHostTrust key={selectedHost.id} remoteHost={selectedHost} />
+                  <LocalHostTrust
+                    key={selectedHost.id}
+                    remoteHost={selectedHost}
+                  />
                 </div>
               </Card>
             )}

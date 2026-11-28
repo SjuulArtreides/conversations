@@ -12,6 +12,8 @@ pub(super) use devices::{decide_device, pending_devices, setup_link};
 mod linear;
 #[path = "web_local.rs"]
 mod local;
+#[path = "web_machines.rs"]
+mod machine_pairing;
 #[path = "web_metadata.rs"]
 mod metadata;
 #[path = "web_passkeys.rs"]
@@ -245,6 +247,9 @@ pub(super) fn router(state: Arc<WebState>) -> Router {
         .route("/api/users", get(users))
         .route("/api/trust", post(trust))
         .route("/api/trust/upgrade", post(upgrade_owner))
+        .route("/api/machines", get(machine_pairing::list))
+        .route("/api/machines/pair", post(machine_pairing::pair))
+        .route("/api/machines/unpair", post(machine_pairing::unpair))
         .route(
             "/api/app",
             get(|| async { Json(json!({"version":env!("CARGO_PKG_VERSION")})) }),

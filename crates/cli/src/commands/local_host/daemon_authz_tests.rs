@@ -5399,6 +5399,9 @@ exit 0
         /// back instead of asking any host (replay / swap).
         replies: Mutex<Vec<Vec<u8>>>,
         answer: Mutex<Option<Vec<u8>>>,
+        /// What it answers to `GET /api/host-relay` and `GET /api/sessions/{id}`.
+        listing: Mutex<serde_json::Value>,
+        sessions: Mutex<HashMap<String, serde_json::Value>>,
     }
 
     /// An untrusted central relay stand-in: plaintext HTTP in front of the real
@@ -5436,6 +5439,26 @@ exit 0
                     let mut body = vec![0u8; length];
                     let _ = stream.read_exact(&mut body).await;
                     relay.paths.lock().unwrap().push(path.clone());
+                    let listed = if path == "/api/host-relay" {
+                        Some(relay.listing.lock().unwrap().to_string())
+                    } else {
+                        path.strip_prefix("/api/sessions/").and_then(|id| {
+                            relay
+                                .sessions
+                                .lock()
+                                .unwrap()
+                                .get(id)
+                                .map(|v| v.to_string())
+                        })
+                    };
+                    if let Some(payload) = listed {
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                            payload.len()
+                        );
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        return;
+                    }
                     if path.ends_with("/identity") {
                         let payload = relay.identity.lock().unwrap().to_string();
                         let response = format!(
@@ -6323,6 +6346,298 @@ exit 0
         fn at_a(&self) -> crate::commands::messaging::MessagingClient {
             self.client(self.receiver.dir(), A)
         }
+    }
+
+    fn machine_card(dir: &Path) -> crate::commands::local_host::machines::Card {
+        use crate::commands::local_host::machines;
+        let key = Store::open(dir).unwrap().host_public_key().unwrap();
+        machines::verify_card(&key, &machines::card(dir).unwrap()).unwrap()
+    }
+
+    /// `(status)` of one operation sent machine to machine; a channel the other
+    /// machine refuses to open counts as refused.
+    async fn machine_op(
+        net: &crate::commands::local_host::machines::Net<'_>,
+        from: &Path,
+        to: &Path,
+        sess: &str,
+        op: &str,
+        args: serde_json::Value,
+    ) -> String {
+        let key = Store::open(to).unwrap().host_public_key().unwrap();
+        match crate::commands::local_host::machines::send(net, from, &key, sess, op, args, 60).await
+        {
+            Ok((status, _)) => status,
+            Err(_) => "refused".into(),
+        }
+    }
+
+    #[test]
+    fn paired_machines_control_each_other_for_every_session_until_either_unpairs() {
+        if !isolated(
+            "write::paired_machines_control_each_other_for_every_session_until_either_unpairs",
+        ) {
+            return;
+        }
+        use crate::commands::local_host::machines;
+        runtime().block_on(async {
+            let mut m = Machines::new().await;
+            let (rdir, sdir) = (m.receiver.dir().to_path_buf(), m.sender.dir().to_path_buf());
+            let http = reqwest::Client::new();
+            let net = machines::Net {
+                http: &http,
+                server: &m.central,
+                cookie: None,
+            };
+            let rename = |title: &str| json!({"session": A, "title": title});
+
+            // Before pairing, the sender's agent key may only message A.
+            assert_eq!(
+                machine_op(&net, &sdir, &rdir, A, "session.rename", rename("Too early")).await,
+                "refused"
+            );
+
+            // The owner pairs each machine on the other, once.
+            machines::pair_card(&rdir, &machine_card(&sdir)).unwrap();
+            machines::pair_card(&sdir, &machine_card(&rdir)).unwrap();
+            let (_, sender_kid) =
+                crate::commands::local_host::agent_link::agent_public(&sdir).unwrap();
+            assert!(Store::open(&rdir)
+                .unwrap()
+                .holds_full_control(&sender_kid)
+                .unwrap());
+
+            // Owner-only control and typing into a terminal.
+            assert_eq!(
+                machine_op(
+                    &net,
+                    &sdir,
+                    &rdir,
+                    A,
+                    "session.rename",
+                    rename("Renamed from my other machine")
+                )
+                .await,
+                "executed"
+            );
+            Terminals::drain(&mut m.rterm.a);
+            let typed = json!({"session": A, "text": "typed by my other machine"});
+            assert_eq!(
+                machine_op(&net, &sdir, &rdir, A, "session.reply", typed).await,
+                "executed"
+            );
+            let written = format!("{:?}", Terminals::drain(&mut m.rterm.a));
+            assert!(
+                written.contains(&B64.encode("typed by my other machine")),
+                "{written}"
+            );
+
+            // Messages reach a session nobody pinned: the server names the
+            // machine, and only a paired machine is used.
+            m.relay.sessions.lock().unwrap().insert(
+                B.into(),
+                json!({"publication": {"host_id": m.receiver.host_id}}),
+            );
+            send_as(
+                &m.sender_b(),
+                B,
+                "hello from my other machine",
+                "paired-1",
+                None,
+            )
+            .await
+            .unwrap();
+            let inbox = inbox_of(&rdir, B);
+            assert_eq!(inbox.len(), 1, "{inbox:?}");
+            assert_eq!(inbox[0].text, "hello from my other machine");
+
+            // Both directions.
+            assert_eq!(
+                machine_op(
+                    &net,
+                    &rdir,
+                    &sdir,
+                    A,
+                    "session.rename",
+                    rename("Renamed back")
+                )
+                .await,
+                "executed"
+            );
+
+            // Unpairing on one machine drops the pairing on both.
+            let unpaired = machines::unpair(&net, &rdir, &m.sender.host_id)
+                .await
+                .unwrap();
+            assert_eq!(unpaired.other, Ok("executed".into()));
+            assert_eq!(
+                machine_op(
+                    &net,
+                    &sdir,
+                    &rdir,
+                    A,
+                    "session.rename",
+                    rename("After unpair")
+                )
+                .await,
+                "refused"
+            );
+            assert_eq!(
+                machine_op(
+                    &net,
+                    &rdir,
+                    &sdir,
+                    A,
+                    "session.rename",
+                    rename("After unpair")
+                )
+                .await,
+                "refused"
+            );
+            assert!(Store::open(&sdir)
+                .unwrap()
+                .paired_machines()
+                .unwrap()
+                .is_empty());
+
+            // Pairing again works, with fresh grants.
+            machines::pair_card(&rdir, &machine_card(&sdir)).unwrap();
+            assert_eq!(
+                machine_op(
+                    &net,
+                    &sdir,
+                    &rdir,
+                    A,
+                    "session.rename",
+                    rename("Paired again")
+                )
+                .await,
+                "executed"
+            );
+        });
+    }
+
+    #[test]
+    fn a_browser_with_full_control_pairs_machines_and_anything_less_cannot() {
+        if !isolated("write::a_browser_with_full_control_pairs_machines_and_anything_less_cannot") {
+            return;
+        }
+        use crate::commands::local_host::authz::store::FULL_CONTROL;
+        use conversations_core::host_relay::OpStatus;
+        runtime().block_on(async {
+            let (receiver, _t) = world();
+            let (rhost, _rt) = arc_host(&receiver);
+            let (other, _o) = world();
+            let card = machine_card(other.dir());
+            let (_, other_kid) = crate::commands::local_host::agent_link::agent_public(other.dir()).unwrap();
+            let args = json!({"host_key": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&card.host_key), "card": card.signed}).to_string();
+            let pair = |signer: &Signer, jti: &str| {
+                let now = now_secs();
+                signer.sign_bytes(
+                    signer
+                        .op_payload(&receiver.host_id, "machine.pair", "host", &args, jti, now, now + 60)
+                        .as_bytes(),
+                )
+            };
+            let full: Vec<String> = FULL_CONTROL.iter().map(|c| c.as_str().to_owned()).collect();
+
+            let partial = Signer::new();
+            receiver.enroll("owner", &partial, &full[..full.len() - 1]).unwrap();
+            let (status, _) = deliver_signed(&rhost, pair(&partial, "0123456789abcdef0123456789abcde1")).await;
+            assert_ne!(status, OpStatus::Executed);
+            assert!(!Store::open(receiver.dir()).unwrap().holds_full_control(&other_kid).unwrap());
+
+            // A forged card (signed by another machine) is refused.
+            let forged = {
+                let mut forged = card.signed.clone();
+                forged.s = machines_card_of_receiver(&receiver).s;
+                forged
+            };
+            let forged_args = json!({"host_key": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&card.host_key), "card": forged}).to_string();
+            let browser = Signer::new();
+            receiver.enroll("owner", &browser, &full).unwrap();
+            let now = now_secs();
+            let forged_frame = browser.sign_bytes(
+                browser
+                    .op_payload(&receiver.host_id, "machine.pair", "host", &forged_args, "0123456789abcdef0123456789abcde2", now, now + 60)
+                    .as_bytes(),
+            );
+            assert_ne!(deliver_signed(&rhost, forged_frame).await.0, OpStatus::Executed);
+            assert!(!Store::open(receiver.dir()).unwrap().holds_full_control(&other_kid).unwrap());
+
+            let (status, detail) = deliver_signed(&rhost, pair(&browser, "0123456789abcdef0123456789abcde3")).await;
+            assert_eq!(status, OpStatus::Executed, "{detail:?}");
+            assert!(Store::open(receiver.dir()).unwrap().holds_full_control(&other_kid).unwrap());
+            let machines = Store::open(receiver.dir()).unwrap().paired_machines().unwrap();
+            assert_eq!(machines.len(), 1);
+            assert_eq!(machines[0].host_id, other.host_id);
+        });
+    }
+
+    #[test]
+    fn pairing_a_new_machine_with_one_of_yours_pairs_it_with_all_of_them() {
+        if !isolated("write::pairing_a_new_machine_with_one_of_yours_pairs_it_with_all_of_them") {
+            return;
+        }
+        use crate::commands::local_host::{agent_link, machines, settings::Settings};
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        runtime().block_on(async {
+            let relay = Arc::new(Relay::default());
+            let central = relay_stub(relay.clone()).await;
+            let mut worlds = Vec::new();
+            let mut terminals = Vec::new();
+            for _ in 0..3 {
+                let (w, _t) = world();
+                let host = Arc::new(w.fixture.host(central.clone()));
+                terminals.push(register(&host));
+                serve_socket(w.dir(), host.clone());
+                relay.routes.lock().unwrap().insert(w.host_id.clone(), host);
+                worlds.push(w);
+            }
+            let mut settings = Settings::load(worlds[0].dir()).unwrap();
+            settings.transport.candidate_ips = vec![std::net::Ipv4Addr::LOCALHOST.into()];
+            settings.save().unwrap();
+            let hosts: Vec<_> = worlds
+                .iter()
+                .map(|w| {
+                    let key = Store::open(w.dir()).unwrap().host_public_key().unwrap();
+                    json!({"id": w.host_id, "key": URL_SAFE_NO_PAD.encode(key), "card": machines::card(w.dir()).unwrap()})
+                })
+                .collect();
+            *relay.listing.lock().unwrap() = json!({ "hosts": hosts });
+            let http = reqwest::Client::new();
+            let net = machines::Net { http: &http, server: &central, cookie: None };
+            let (old, mine, new) = (&worlds[0], &worlds[1], &worlds[2]);
+
+            // Two machines are already paired with each other.
+            machines::pair_card(old.dir(), &machine_card(mine.dir())).unwrap();
+            machines::pair_card(mine.dir(), &machine_card(old.dir())).unwrap();
+
+            // The new machine is paired with just one of them, from each side.
+            // The first side cannot yet tell the new machine about the others.
+            machines::pair_listed(&net, mine.dir(), &new.host_id).await.unwrap();
+            machines::pair_listed(&net, new.dir(), &mine.host_id).await.unwrap();
+
+            let kid = |w: &World| agent_link::agent_public(w.dir()).unwrap().1;
+            let trusts = |w: &World, other: &World| {
+                Store::open(w.dir()).unwrap().holds_full_control(&kid(other)).unwrap()
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                while !(trusts(old, new) && trusts(new, old)) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .expect("the new machine and the old one pair through the machine both trust");
+            let rename = json!({"session": A, "title": "Renamed by the new machine"});
+            assert_eq!(machine_op(&net, new.dir(), old.dir(), A, "session.rename", rename.clone()).await, "executed");
+            assert_eq!(machine_op(&net, old.dir(), new.dir(), A, "session.rename", rename).await, "executed");
+            drop(terminals);
+        });
+    }
+
+    fn machines_card_of_receiver(world: &World) -> conversations_core::host_relay::Signed {
+        crate::commands::local_host::machines::card(world.dir()).unwrap()
     }
 
     async fn send_as(

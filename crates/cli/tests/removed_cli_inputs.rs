@@ -47,6 +47,7 @@ fn help_shows_the_conversations_command_and_its_current_commands() {
             "host",
             "open",
             "credential",
+            "machine",
             "passkey",
             "history",
             "login",

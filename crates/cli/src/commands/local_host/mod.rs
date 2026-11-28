@@ -13,6 +13,7 @@ pub(crate) mod history;
 mod import;
 mod installer;
 mod linear_metadata;
+pub(crate) mod machines;
 mod migration;
 mod onboarding;
 mod opencode_bridge;
@@ -157,6 +158,37 @@ pub struct CredentialArgs {
     pub runtime: RuntimeDirArgs,
     #[command(subcommand)]
     pub command: CredentialCommand,
+}
+
+/// Top-level `machine`.
+#[derive(Debug, Args)]
+pub struct MachineArgs {
+    #[command(flatten)]
+    pub runtime: RuntimeDirArgs,
+    #[command(subcommand)]
+    pub command: MachineCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MachineCommand {
+    /// This machine's fingerprint, and the account's machines online now.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pair one of your machines: it gets full control of this machine, for
+    /// every session, now and later. First compare its fingerprint with the
+    /// one `machine list` prints on that machine. Pair it from there too.
+    Pair {
+        /// The machine's fingerprint (or host id), as `machine list` shows it.
+        #[arg(allow_hyphen_values = true)]
+        machine: String,
+    },
+    /// Unpair a machine here, and ask it to unpair this one.
+    Unpair {
+        #[arg(allow_hyphen_values = true)]
+        machine: String,
+    },
 }
 
 /// Top-level `passkey`.
@@ -1183,6 +1215,89 @@ pub(super) fn default_command(agent: AgentKind, command: &[String]) -> Vec<Strin
     } else {
         vec![agent.as_str().into()]
     }
+}
+
+/// `machine`: pairing works from the saved sign-in for `global.server`; the
+/// listing and the private channel go through that server's relay.
+pub fn machine(global: &GlobalOpts, args: &MachineArgs) -> Result<()> {
+    let dir = args.runtime.resolve()?;
+    let cookie = crate::credentials::cookie_for(&global.server);
+    let http = reqwest::Client::new();
+    let net = machines::Net {
+        http: &http,
+        server: &global.server,
+        cookie: cookie.as_deref(),
+    };
+    block_on(async {
+        match &args.command {
+            MachineCommand::List { json } => {
+                let listed = machines::account_machines(&net, &dir).await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&listed)?);
+                    return Ok(());
+                }
+                if !listed.iter().any(|m| m.this_machine) {
+                    let own = authz::host_id(&dir)?;
+                    println!(
+                        "This machine: {} (not attached: is `conversations host` running?)",
+                        machines::fingerprint(&own)
+                    );
+                }
+                for machine in &listed {
+                    let state = if machine.this_machine {
+                        "this machine"
+                    } else if machine.paired && machine.card.is_none() {
+                        "paired, offline"
+                    } else if machine.paired {
+                        "paired"
+                    } else {
+                        "not paired"
+                    };
+                    println!("{}  {}  ({state})", machine.fingerprint, machine.label);
+                }
+                Ok(())
+            }
+            MachineCommand::Pair { machine } => {
+                let paired = machines::pair_listed(&net, &dir, machine).await?;
+                println!(
+                    "Paired {}: it now has full control of this machine.",
+                    paired.label
+                );
+                for spread in paired.spread {
+                    println!("  {}: {}", spread.machine, spread.outcome);
+                }
+                println!(
+                    "If you have not yet, pair this machine on {} too.",
+                    paired.label
+                );
+                Ok(())
+            }
+            MachineCommand::Unpair { machine } => {
+                let unpaired = machines::unpair(&net, &dir, machine).await?;
+                println!(
+                    "Unpaired {}: {} grant(s) revoked here.",
+                    unpaired.label, unpaired.revoked.grants
+                );
+                match unpaired.other {
+                    Ok(status) => println!("{} answered: {status}", unpaired.label),
+                    Err(error) => println!(
+                        "{} could not be told ({error}); unpair this machine there too.",
+                        unpaired.label
+                    ),
+                }
+                // Interrupt work the machine's authority started here.
+                if let Ok(ServerMessage::Interruptions { sessions }) =
+                    request(&dir, ClientMessage::AuthorityChanged).await
+                {
+                    for interruption in sessions {
+                        let outcome = protocol::CancelOutcome::describe(interruption.outcome);
+                        println!("Session {}: {outcome}", interruption.session);
+                    }
+                }
+                Ok(())
+            }
+        }
+    })
 }
 
 /// `credential revoke`: commit the revocation locally first (it holds

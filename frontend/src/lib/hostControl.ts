@@ -911,6 +911,24 @@ export async function passkeyVouch(
   };
 }
 
+/**
+ * Pair `peer`, another of the owner's machines, on `hostId`: the peer gets
+ * full control there. `peer.key` must be the identity key this browser pinned
+ * for it, never one taken from the server; the host checks that it signed
+ * `peer.card` and that this browser's key itself has full control.
+ */
+export async function pairMachine(
+  hostId: string,
+  peer: { key: string; card: { p: string; s: string } },
+): Promise<string> {
+  return (
+    (await channelOperation(pairedOrThrow(hostId), "machine.pair", HOST_SCOPE, {
+      host_key: peer.key,
+      card: peer.card,
+    })) ?? ""
+  );
+}
+
 export const hostControl = {
   async exportSessionChunk(
     hostId: string,
@@ -1220,20 +1238,38 @@ export const hostControl = {
     },
   ): Promise<{ kid: string }> {
     const started = JSON.parse(
-      (await channelOperation(hostId, "browser_trust.start", HOST_SCOPE, request)) ?? "null",
+      (await channelOperation(
+        hostId,
+        "browser_trust.start",
+        HOST_SCOPE,
+        request,
+      )) ?? "null",
     );
     if (typeof started?.challenge !== "string" || !started.options) {
-      throw new HostControlError("The host did not return an approval challenge.", "refused");
+      throw new HostControlError(
+        "The host did not return an approval challenge.",
+        "refused",
+      );
     }
     const response = await getPasskeyAssertion(started.options);
     const approved = JSON.parse(
-      (await channelOperation(hostId, "browser_trust.finish", HOST_SCOPE, {
-        challenge: started.challenge,
-        response,
-      }, undefined, false)) ?? "null",
+      (await channelOperation(
+        hostId,
+        "browser_trust.finish",
+        HOST_SCOPE,
+        {
+          challenge: started.challenge,
+          response,
+        },
+        undefined,
+        false,
+      )) ?? "null",
     );
     if (approved?.kid !== request.kid) {
-      throw new HostControlError("The host did not confirm the selected browser key.", "refused");
+      throw new HostControlError(
+        "The host did not confirm the selected browser key.",
+        "refused",
+      );
     }
     return { kid: request.kid };
   },
