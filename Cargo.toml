@@ -5,7 +5,7 @@ exclude = ["vendor/vt100"]
 
 [workspace.package]
 # Bumping this on main releases the CLI: see DEVELOPMENT.md#releases.
-version = "0.71.0"
+version = "0.71.1"
 edition = "2021"
 license = "MIT"
 authors = ["Arrakis Engineering"]

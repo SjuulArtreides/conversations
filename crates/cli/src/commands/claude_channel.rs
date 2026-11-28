@@ -149,7 +149,7 @@ pub(crate) fn start(client: MessagingClient, peer: Peer<RoleServer>) -> Result<C
 
 /// Enable only an explicitly registered personal channel. The native interactive
 /// confirmation and organization policy remain in control of actual admission.
-pub(crate) fn prepare(command: &str, args: &mut Vec<String>) -> Result<()> {
+pub(crate) fn prepare(command: &str, args: &mut Vec<String>, server: &str) -> Result<()> {
     if Path::new(command)
         .file_name()
         .and_then(|name| name.to_str())
@@ -184,9 +184,27 @@ pub(crate) fn prepare(command: &str, args: &mut Vec<String>) -> Result<()> {
             return Ok(());
         }
     };
+    let exe = std::env::current_exe().context("no current executable")?;
+    apply_registration(&config, args, &exe.to_string_lossy(), server);
+    Ok(())
+}
+
+/// For a user-registered `conversations` MCP server, run it from THIS
+/// executable against this host's server, keeping the registered delivery
+/// mode. A registration that names an older install (for example the
+/// pre-rename `arrakis-conversations`) cannot read this host's authority
+/// database, so the agent could neither hand off nor report back. Claude
+/// prefers a server from `--mcp-config` over the same name in `~/.claude.json`.
+fn apply_registration(config: &Value, args: &mut Vec<String>, exe: &str, server: &str) {
     let registration = &config["mcpServers"]["conversations"];
-    // Registrations made before the executable was renamed still name a
-    // working `arrakis-conversations` install.
+    let registered_args: Vec<String> = registration["args"]
+        .as_array()
+        .map(|args| {
+            args.iter()
+                .filter_map(|arg| arg.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
     let registered = registration["command"].as_str().is_some_and(|command| {
         matches!(
             Path::new(command)
@@ -194,14 +212,42 @@ pub(crate) fn prepare(command: &str, args: &mut Vec<String>) -> Result<()> {
                 .and_then(|name| name.to_str()),
             Some("conversations" | "arrakis-conversations")
         )
-    }) && registration["args"].as_array().is_some_and(|args| {
-        args.windows(2)
-            .any(|pair| pair[0] == "mcp" && pair[1] == "serve")
-            && args
-                .windows(2)
-                .any(|pair| pair[0] == "--delivery" && pair[1] == "claude")
-    });
-    if registered && !args.iter().any(|arg| arg == "server:conversations") {
+    }) && registered_args
+        .windows(2)
+        .any(|pair| pair[0] == "mcp" && pair[1] == "serve");
+    if !registered {
+        return;
+    }
+    let position = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len());
+    if !args.iter().any(|arg| arg == "--mcp-config") {
+        let mut server_args = registered_args.clone();
+        match server_args.iter().position(|arg| arg == "--server") {
+            Some(at) if at + 1 < server_args.len() => server_args[at + 1] = server.to_owned(),
+            _ => {
+                server_args.splice(0..0, ["--server".to_owned(), server.to_owned()]);
+            }
+        }
+        let mut entry = serde_json::json!({
+            "type": "stdio",
+            "command": exe,
+            "args": server_args,
+        });
+        if registration["env"].is_object() {
+            entry["env"] = registration["env"].clone();
+        }
+        let override_config = serde_json::json!({ "mcpServers": { "conversations": entry } });
+        args.splice(
+            position..position,
+            ["--mcp-config".into(), override_config.to_string()],
+        );
+    }
+    let channel = registered_args
+        .windows(2)
+        .any(|pair| pair[0] == "--delivery" && pair[1] == "claude");
+    if channel && !args.iter().any(|arg| arg == "server:conversations") {
         let position = args
             .iter()
             .position(|arg| arg == "--")
@@ -214,12 +260,97 @@ pub(crate) fn prepare(command: &str, args: &mut Vec<String>) -> Result<()> {
             ],
         );
     }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn mcp_override(args: &[String]) -> Value {
+        let at = args
+            .iter()
+            .position(|arg| arg == "--mcp-config")
+            .expect("--mcp-config");
+        serde_json::from_str(&args[at + 1]).unwrap()
+    }
+
+    #[test]
+    fn a_stale_registration_runs_from_this_executable_against_this_hosts_server() {
+        let config = serde_json::json!({"mcpServers": {"conversations": {
+            "type": "stdio",
+            "command": "/home/me/.local/bin/arrakis-conversations",
+            "args": ["--server", "https://old.example", "mcp", "serve", "--delivery", "conversations"],
+            "env": {"KEEP": "1"},
+        }}});
+        let mut args = vec![
+            "--session-id".to_owned(),
+            "s".to_owned(),
+            "--".to_owned(),
+            "brief".to_owned(),
+        ];
+        apply_registration(
+            &config,
+            &mut args,
+            "/opt/conversations",
+            "https://host.example",
+        );
+        assert_eq!(
+            mcp_override(&args),
+            serde_json::json!({"mcpServers": {"conversations": {
+                "type": "stdio",
+                "command": "/opt/conversations",
+                "args": ["--server", "https://host.example", "mcp", "serve", "--delivery", "conversations"],
+                "env": {"KEEP": "1"},
+            }}})
+        );
+        // Inserted before `--`, so the brief stays the prompt.
+        assert_eq!(
+            args[args.len() - 2..],
+            ["--".to_owned(), "brief".to_owned()]
+        );
+        assert!(!args.contains(&"server:conversations".to_owned()));
+    }
+
+    #[test]
+    fn a_channel_registration_keeps_its_channel_and_unregistered_users_are_left_alone() {
+        let channel = serde_json::json!({"mcpServers": {"conversations": {
+            "command": "conversations",
+            "args": ["mcp", "serve", "--delivery", "claude"],
+        }}});
+        let mut args = Vec::new();
+        apply_registration(
+            &channel,
+            &mut args,
+            "/opt/conversations",
+            "https://host.example",
+        );
+        assert_eq!(
+            mcp_override(&args)["mcpServers"]["conversations"]["args"],
+            serde_json::json!([
+                "--server",
+                "https://host.example",
+                "mcp",
+                "serve",
+                "--delivery",
+                "claude"
+            ])
+        );
+        assert!(args.contains(&"server:conversations".to_owned()));
+
+        for config in [
+            serde_json::json!({}),
+            serde_json::json!({"mcpServers": {"conversations": {"command": "/usr/bin/other", "args": ["mcp", "serve"]}}}),
+        ] {
+            let mut args = vec!["brief".to_owned()];
+            apply_registration(
+                &config,
+                &mut args,
+                "/opt/conversations",
+                "https://host.example",
+            );
+            assert_eq!(args, ["brief".to_owned()]);
+        }
+    }
+
     #[test]
     fn notification_attempt_survives_restart_without_claiming_receipt() {
         let directory = tempfile::tempdir().unwrap();
