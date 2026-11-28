@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveSessions } from "@/lib/useLiveSessions";
 import { useSessionRestart } from "@/lib/sessionRestart";
@@ -22,8 +22,9 @@ import { LiveSessionDetail } from "./LiveSessionDetail";
  * render a brief spinner instead of flashing the stored view. Within-app
  * navigation has the poll cached already, so this is instant; only a cold deep
  * link pays the one-fetch wait. When a live session completes it drops out of
- * the active set on the next poll, so this view flips to the stored transcript
- * on its own — no manual "view full conversation" step. The stored row cached
+ * the active set on the next poll. If another session is live, the route switches
+ * to it and preserves fullscreen. Otherwise it shows the stored transcript.
+ * The stored row cached
  * before the session went live (e.g. an empty just-started handoff) is
  * refetched on that flip rather than served from cache.
  */
@@ -31,16 +32,18 @@ export function SessionRoute() {
   const { id = "" } = useParams();
   const [searchParams] = useSearchParams();
   const fullscreen = searchParams.get("fullscreen") === "1";
-  const { activeIds, isLoading } = useLiveSessions();
+  const { list, activeIds, isLoading } = useLiveSessions();
   const restart = useSessionRestart(id);
   const queryClient = useQueryClient();
   const live = activeIds.has(id);
-  const wasLive = useRef(live);
+  const previousLiveId = useRef<string | null>(null);
+  const ended = previousLiveId.current === id && !live && !restart.pending;
+  const next = ended ? list[0] : undefined;
   useEffect(() => {
-    if (wasLive.current && !live)
+    if (ended)
       void queryClient.invalidateQueries({ queryKey: ["session", id] });
-    wasLive.current = live;
-  }, [id, live, queryClient]);
+    previousLiveId.current = live && !restart.pending ? id : null;
+  }, [id, live, ended, restart.pending, queryClient]);
 
   if (restart.pending)
     return fullscreen ? (
@@ -60,6 +63,14 @@ export function SessionRoute() {
     ) : (
       <Spinner label="Loading session…" />
     );
+  if (next)
+    return (
+      <Navigate
+        replace
+        to={`/sessions/${encodeURIComponent(next.id)}${fullscreen ? "?fullscreen=1" : ""}`}
+      />
+    );
+
   // The same id can be resumed before React commits the missing-list entry.
   // A generation key resets the stream's complete state and the PTY ended flag
   // even when removal/re-registration are batched into a single render.
