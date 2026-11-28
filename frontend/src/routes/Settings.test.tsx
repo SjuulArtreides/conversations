@@ -53,7 +53,7 @@ vi.mock("@/lib/hostControl", async () => {
 
 import { api } from "@/lib/api";
 import { localRequest, useLocalHost } from "@/lib/localHost";
-import { hostControl } from "@/lib/hostControl";
+import { hostControl, NOT_APPROVED_MESSAGE } from "@/lib/hostControl";
 import {
   pairHost,
   selectHost,
@@ -455,14 +455,12 @@ describe("Settings — container repositories", () => {
 
   it("without an authorized host the launch controls are locked, say why, and nothing falls back to the server", async () => {
     vi.mocked(hostControl.getHostSettings).mockRejectedValue(
-      new Error(
-        "Pair a host in Settings first: no host is trusted by this browser.",
-      ),
+      new Error(NOT_APPROVED_MESSAGE),
     );
     const user = userEvent.setup();
     await renderSettings("Launch");
     await screen.findByText("/Users/dev/mono");
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Pair a host/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/No machine has approved this browser/);
     expect(
       screen.getByRole("radio", { name: "Use Claude settings" }),
     ).toBeDisabled();

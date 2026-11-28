@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
-import { HostControlError } from "@/lib/hostControl";
+import { HostControlError, NOT_APPROVED_MESSAGE } from "@/lib/hostControl";
 import type { PrivateChannel } from "@/lib/privateChannel";
 import { markClosing, clearClosing, privateScope } from "@/lib/pendingClose";
 import {
@@ -385,10 +385,7 @@ describe("StartNewSessionButton", () => {
   it("shows the host's refusal as-is, without a fallback", async () => {
     mockedControl.mockReturnValue({ available: true, isLoading: false });
     mockedStartNew.mockRejectedValue(
-      new HostControlError(
-        "Pair a host in Settings first: no host is trusted by this browser.",
-        "not_paired",
-      ),
+      new HostControlError(NOT_APPROVED_MESSAGE, "not_paired"),
     );
     const user = userEvent.setup();
     renderWithProviders(<StartNewSessionButton />);
@@ -396,11 +393,8 @@ describe("StartNewSessionButton", () => {
     await user.click(
       screen.getByRole("button", { name: /start new session/i }),
     );
-    expect(
-      await screen.findByText(
-        /pair a host in settings first.*settings → hosts/i,
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(NOT_APPROVED_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText(/pair a host/i)).not.toBeInTheDocument();
   });
 
   it("is disabled when no host is attached", () => {

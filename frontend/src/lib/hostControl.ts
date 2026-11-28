@@ -292,13 +292,17 @@ async function authentic<T>(check: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Shown when no machine has approved this browser yet: the fix is on the machine. */
+export const NOT_APPROVED_MESSAGE =
+  "No machine has approved this browser yet. On your machine, open local Conversations → Settings → Host access and approve this browser's fingerprint under Waiting for approval. This browser then connects by itself.";
+
 async function pinnedHostOrThrow(
   hostId: string,
 ): Promise<VerifiablePairedHost> {
   const host = pairedHost(hostId);
   if (!host) {
     throw new HostControlError(
-      "Pair a host in Settings first: no host is trusted by this browser.",
+      NOT_APPROVED_MESSAGE,
       "not_paired",
     );
   }
@@ -664,7 +668,7 @@ function pairedHostOrThrow(): string {
   const host = activeHost();
   if (!host) {
     throw new HostControlError(
-      "Pair a host in Settings first: no host is trusted by this browser.",
+      NOT_APPROVED_MESSAGE,
       "not_paired",
     );
   }

@@ -19,6 +19,9 @@ interface LocalStatus {
   }>;
 }
 
+/** How often the local page looks for keys your account newly published. */
+export const WAITING_KEYS_POLL_MS = 5000;
+
 // PR refresh (pr.sync / pr.unlink) is no longer its own permission:
 // `session.write` — the capability that lets a key drive a session's
 // terminal — also lets it refresh that session's linked pull requests.
@@ -97,6 +100,16 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     queryFn: () => localRequest<LocalStatus>("/api/status"),
     enabled: local,
   });
+  const waiting = useQuery({
+    queryKey: ["local-host-waiting-keys"],
+    queryFn: () =>
+      localRequest<{ email: string; keys: PublishedBrowserKey[] }>(
+        "/api/waiting-keys",
+      ),
+    enabled: local,
+    refetchInterval: WAITING_KEYS_POLL_MS,
+    retry: false,
+  });
   const directory = useQuery({
     queryKey: ["host-trust-directory", remoteHost?.id, query],
     queryFn: () =>
@@ -109,18 +122,29 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     retry: false,
   });
   const trust = useMutation({
-    mutationFn: () => {
-      if (!selected || !compared || !grants.length || !label.trim())
+    // `own` is a key from Waiting for approval: your own account published it,
+    // its fingerprint is on screen next to the button, and the click is the
+    // comparison. It gets full access.
+    mutationFn: (own?: PublishedBrowserKey) => {
+      if (!own && (!selected || !compared || !grants.length || !label.trim()))
         throw new Error(
           "Select and independently compare a key before trusting it.",
         );
-      const request = {
-        kid: selected.key.kid,
-        public_key: selected.key.public_key,
-        label: label.trim(),
-        compared: true,
-        grants,
-      };
+      const request = own
+        ? {
+            kid: own.kid,
+            public_key: own.public_key,
+            label: own.label.trim().slice(0, 64) || "My browser",
+            compared: true,
+            grants: permissions.map(([cap]) => cap),
+          }
+        : {
+            kid: selected!.key.kid,
+            public_key: selected!.key.public_key,
+            label: label.trim(),
+            compared: true,
+            grants,
+          };
       if (remoteHost) return hostControl.trustPublishedBrowser(remoteHost.id, request);
       return localRequest<{ kid: string }>("/api/trust", {
         method: "POST",
@@ -130,6 +154,7 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     onSuccess: () => {
       setCompared(false);
       void cache.invalidateQueries({ queryKey: ["local-host-status"] });
+      void cache.invalidateQueries({ queryKey: ["local-host-waiting-keys"] });
     },
   });
   const upgrade = useMutation({
@@ -211,6 +236,59 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
         />
       )}
 
+      {waiting.data && waiting.data.keys.length > 0 && (
+        <div className="space-y-3" aria-labelledby="local-trust-waiting-heading">
+          <h3 id="local-trust-waiting-heading" className="text-sm font-semibold">
+            Waiting for approval
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Browsers signed in as {waiting.data.email} published these
+            fingerprints. Approve one only if it matches the fingerprint that
+            browser shows. An approved browser gets full access to this host.
+          </p>
+          <ul className="space-y-2">
+            {waiting.data.keys.map((key) => (
+              <li
+                key={key.kid}
+                className="rounded-lg border border-primary/40 p-3 space-y-2"
+              >
+                <p className="text-sm font-medium">{key.label}</p>
+                <code className="block break-all select-all text-xs">
+                  {key.kid}
+                </code>
+                <Button
+                  size="sm"
+                  disabled={trust.isPending}
+                  onClick={() => trust.mutate(key)}
+                >
+                  {trust.isPending && trust.variables?.kid === key.kid
+                    ? "Approving…"
+                    : "Approve"}
+                </Button>
+                {trust.variables?.kid === key.kid && trust.error && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {trust.error.message}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* Success is shown globally because the row disappears on refetch
+          once the key moves from waiting-keys into credentials. */}
+      {trust.variables && trust.isSuccess && (
+        <p role="status" className="text-sm">
+          Approved {trust.variables.label}. That browser connects by itself
+          within a few seconds.
+        </p>
+      )}
+      {waiting.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {waiting.error.message}
+        </p>
+      )}
+
       {status.data && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">People with access</h3>
@@ -245,6 +323,20 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                     </div>
                     <p className="text-xs text-muted-foreground">{displayed}</p>
 
+                    {!credential.revoked && missing.length > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={upgrade.isPending}
+                        onClick={() =>
+                          upgrade.mutate({
+                            kid: credential.kid,
+                            grants: missing,
+                          })
+                        }
+                      >
+                        Give full access
+                      </Button>
+                    )}
                     {!credential.revoked && missing.length > 0 && (
                       <Collapsible label="Add permissions">
                         <div className="space-y-2">
@@ -297,12 +389,16 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                     {upgrade.isSuccess &&
                       upgrade.variables?.kid === credential.kid && (
                         <p role="status" className="text-xs">
-                          {upgrade.data.added.length
-                            ? "Permission added"
-                            : "Already allowed"}
-                          :{" "}
-                          {PERMISSION_LABELS[upgrade.variables.grants[0]] ??
-                            upgrade.variables.grants[0]}
+                          {upgrade.variables.grants.length > 1
+                            ? "Full access given"
+                            : `${
+                                upgrade.data.added.length
+                                  ? "Permission added"
+                                  : "Already allowed"
+                              }: ${
+                                PERMISSION_LABELS[upgrade.variables.grants[0]] ??
+                                upgrade.variables.grants[0]
+                              }`}
                           . Renew access to this host in the hosted app with
                           your passkey (Touch ID) to use it.
                         </p>
@@ -486,16 +582,16 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
                   !label.trim() ||
                   trust.isPending
                 }
-                onClick={() => trust.mutate()}
+                onClick={() => trust.mutate(undefined)}
               >
                 {trust.isPending ? "Trusting…" : "Trust public key"}
               </Button>
-              {trust.error && (
+              {!trust.variables && trust.error && (
                 <p role="alert" className="text-sm text-destructive">
                   {trust.error.message}
                 </p>
               )}
-              {trust.isSuccess && (
+              {!trust.variables && trust.isSuccess && (
                 <p role="status" className="text-sm">
                   Public key trusted with the selected permissions.
                 </p>
