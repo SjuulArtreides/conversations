@@ -86,6 +86,40 @@ function progress() {
   return within(screen.getByRole("list", { name: "Host setup progress" }));
 }
 
+it("copies an existing machine to a new browser and requires approval there", async () => {
+  const user = userEvent.setup();
+  await pairHost(fixture.host.descriptor, "MacBook", "browser-key");
+  mocks.access.mockResolvedValue({ canRead: true, canStart: true });
+  const desktop = renderWithProviders(<HostSetup />, { route: "/settings" });
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Copy link to set up another browser",
+    }),
+  );
+  await screen.findByText("Copied.");
+  const link = new URL(await navigator.clipboard.readText());
+  desktop.unmount();
+
+  localStorage.removeItem("conversations.hosts");
+  mocks.access.mockRejectedValue(
+    new HostControlError("Browser key not approved", "refused"),
+  );
+  renderWithProviders(<HostSetup />, { route: link.pathname + link.hash });
+  const connectBrowser = screen.getByRole("button", { name: "Connect to MacBook" });
+  expect(activeHost()).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Host descriptor" })).toBeNull();
+  await user.click(connectBrowser);
+
+  expect(await screen.findByText("Online")).toBeVisible();
+  expect(activeHost()).toMatchObject({ id: fixture.host.id, label: "MacBook" });
+  expect(screen.queryByRole("button", { name: "Go to sessions" })).toBeNull();
+  await user.click(
+    await screen.findByRole("button", { name: "Prepare this browser for approval" }),
+  );
+  expect(await screen.findByText("browser-fingerprint")).toBeVisible();
+  expect(mocks.publish).toHaveBeenCalledTimes(1);
+});
+
 it("connects a public machine descriptor in browser-key mode and keeps browser name editable", async () => {
   const user = userEvent.setup();
   renderWithProviders(<HostSetup />);

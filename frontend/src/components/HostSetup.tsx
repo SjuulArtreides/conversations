@@ -1,10 +1,11 @@
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBrowserPublication } from "@/lib/browserPublication";
 import { inspectHostAccess } from "@/lib/hostSetup";
+import { DESCRIPTOR_PREFIX } from "@/lib/hostStatements";
 import { toBase64 } from "@/lib/hostAuth";
 import {
   closePrivateChannels,
@@ -87,6 +88,10 @@ export function HostSetup({
   webOrigin?: string;
 }) {
   const navigate = useNavigate();
+  const { hash } = useLocation();
+  const setupLink = new URLSearchParams(hash.slice(1));
+  const setupDescriptor = setupLink.get("browser-setup");
+  const setupMachine = setupLink.get("machine")?.slice(0, 64) || "My host";
   const client = useQueryClient();
   const pairing = usePairedHosts();
   const host = pairing.hosts.find(
@@ -170,16 +175,16 @@ export function HostSetup({
     };
   }, [identity]);
 
-  const connect = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const connect = async (hostDescriptor: string, label: string) => {
     setPairingError(null);
     setPairingMachine(true);
     try {
       closePrivateChannels();
-      const paired = await pairHost(descriptor, machineName, "browser-key");
+      const paired = await pairHost(hostDescriptor, label, "browser-key");
       setPausedIdentity(`${paired.id}:browser-key`);
       setDescriptor("");
       setMachineName("");
+      if (setupDescriptor) navigate("/settings", { replace: true });
     } catch (error) {
       setPairingError((error as Error).message);
     } finally {
@@ -375,7 +380,7 @@ export function HostSetup({
     <section aria-labelledby="host-setup-heading" className="space-y-5">
       <div>
         <h2 id="host-setup-heading" className="text-lg font-semibold">
-          Set up your machine
+          {setupDescriptor && !host ? "Connect this browser" : "Set up your machine"}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Connect a machine, then approve this browser on that machine. Being
@@ -425,7 +430,34 @@ export function HostSetup({
           current={verified && !ready}
         />
       </ol>
-      {!host && (
+      {!host && setupDescriptor && (
+        <div className="space-y-3 text-sm">
+          <p>
+            Use this link only if you copied it from Conversations on your own
+            machine. After connecting, approve this browser’s fingerprint on
+            <strong> {setupMachine}</strong>.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={pairingMachine}
+              onClick={() => void connect(setupDescriptor, setupMachine)}
+            >
+              Connect to {setupMachine}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPairingError(null);
+                navigate("/settings", { replace: true });
+              }}
+            >
+              Use manual setup
+            </Button>
+          </div>
+          {pairingError && <p role="alert">{pairingError}</p>}
+        </div>
+      )}
+      {!host && !setupDescriptor && (
         <ol
           aria-label="Connect a machine"
           className="list-decimal space-y-4 pl-5 text-sm"
@@ -536,7 +568,10 @@ export function HostSetup({
           </li>
           <li>
             <form
-              onSubmit={(event) => void connect(event)}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void connect(descriptor, machineName);
+              }}
               className="space-y-3"
             >
               <p className="font-medium">Paste it here and connect</p>
@@ -863,13 +898,33 @@ export function HostSetup({
           host.
         </p>
       )}
-      {ready && (
+      {ready && host && isPinned(host) && (
         <div className="space-y-3">
           <p role="status" className="text-sm">
             {host!.label} verified this browser can read history and start
             sessions.
           </p>
-          <Button onClick={() => navigate("/")}>Go to sessions</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => navigate("/")}>Go to sessions</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const link = new URL("/settings", window.location.origin);
+                link.hash = new URLSearchParams({
+                  "browser-setup": DESCRIPTOR_PREFIX + host.key,
+                  machine: host.label,
+                }).toString();
+                void copy(link.href);
+              }}
+            >
+              Copy link to set up another browser
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Open the link in the browser you want to use, then approve its
+            fingerprint on {host.label}.
+          </p>
+          {copyStatus && <p role="status">{copyStatus}</p>}
         </div>
       )}
     </section>

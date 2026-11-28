@@ -411,12 +411,12 @@ it("offers one setup entry even when shared sessions exist", async () => {
   renderWithProviders(<SessionList />);
   expect(await screen.findByText("mine-1")).toBeVisible();
   expect(
-    screen.getByRole("heading", { name: "Connect a machine" }),
+    screen.getByRole("heading", { name: "Set up this browser" }),
   ).toBeVisible();
   expect(
-    screen.getByText(/approve this browser on that machine/),
+    screen.getByText(/approve this browser’s fingerprint on your machine/),
   ).toBeVisible();
-  expect(screen.getByRole("link", { name: "Set up access" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Set up a machine" })).toHaveAttribute(
     "href",
     "/settings",
   );
