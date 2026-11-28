@@ -7,8 +7,8 @@
 # Postgres backend has no tests that need a live DB), so no service container is
 # required.
 #
-# Lint runs beside tests. Nextest schedules tests across binary boundaries;
-# Cargo's doctests and the explicit browser integration test still run below.
+# Lint runs beside tests. The regular nextest suite and the opt-in WebRTC
+# browser test share a build and run concurrently. Cargo runs doctests separately.
 name: CI
 
 on:
@@ -158,9 +158,39 @@ jobs:
           getconf _NPROCESSORS_ONLN
           free --mebi
 
-      - name: Rust unit and integration tests (nextest)
-        # The CI profile terminates a test that hangs for ten minutes.
-        run: /usr/bin/time --verbose cargo nextest run --locked --workspace --no-fail-fast --profile ci
+      - name: Prepare private transport browser fixture
+        run: |
+          npm install --prefix "$RUNNER_TEMP/private-transport" --ignore-scripts --no-audit --no-fund node-turn@0.0.6
+          # A missing runtime fails here rather than exporting an empty path.
+          node="$(command -v node)"
+          chrome="$(command -v google-chrome)"
+          {
+            echo "PRIVATE_TRANSPORT_NODE=$node"
+            echo "PRIVATE_TRANSPORT_CHROME=$chrome"
+            echo "PRIVATE_TRANSPORT_NODE_MODULES=$RUNNER_TEMP/private-transport/node_modules"
+          } >> "$GITHUB_ENV"
+
+      - name: Build Rust test binaries
+        run: cargo nextest run --locked --workspace --profile ci --no-run
+
+      - name: Run Rust tests and WebRTC browser test
+        run: |
+          # Both invocations use the same workspace build. Buffer the browser
+          # output so its evidence can be read separately from the regular suite.
+          browser_log="$RUNNER_TEMP/private-transport-test.log"
+          cargo nextest run --locked --workspace --profile ci --run-ignored only \
+            --no-tests fail --no-capture -E 'binary(=private_files_terminal)' > "$browser_log" 2>&1 &
+          browser_pid=$!
+
+          suite_status=0
+          /usr/bin/time --verbose cargo nextest run --locked --workspace --no-fail-fast --profile ci || suite_status=$?
+          browser_status=0
+          wait "$browser_pid" || browser_status=$?
+
+          echo "::group::Private files and terminal over WebRTC"
+          cat "$browser_log"
+          echo "::endgroup::"
+          test "$suite_status" -eq 0 && test "$browser_status" -eq 0
 
       - name: Rust doctests
         run: cargo test --locked --workspace --doc
@@ -176,22 +206,6 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
-
-      - name: Prepare private transport browser fixture
-        run: |
-          npm install --prefix "$RUNNER_TEMP/private-transport" --ignore-scripts --no-audit --no-fund node-turn@0.0.6
-          # A missing runtime fails here rather than exporting an empty path.
-          node="$(command -v node)"
-          chrome="$(command -v google-chrome)"
-          {
-            echo "PRIVATE_TRANSPORT_NODE=$node"
-            echo "PRIVATE_TRANSPORT_CHROME=$chrome"
-            echo "PRIVATE_TRANSPORT_NODE_MODULES=$RUNNER_TEMP/private-transport/node_modules"
-          } >> "$GITHUB_ENV"
-
-      - name: Private files and terminal over WebRTC
-        timeout-minutes: 10
-        run: cargo test --locked -p conversations-cli --test private_files_terminal -- --ignored --nocapture
 
       - name: MCP thread identity and messaging
         timeout-minutes: 5
