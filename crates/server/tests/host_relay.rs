@@ -342,6 +342,48 @@ async fn any_account_may_route_but_no_other_account_can_claim_or_answer_for_a_ho
     assert_eq!(to_a.await.unwrap().status(), 200);
 }
 
+async fn attached(server: &Server, user: &str) -> Value {
+    server
+        .http
+        .get(format!("{}/api/host-relay", server.base))
+        .header("x-demo-user", user)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_account_lists_only_the_hosts_it_attached_with_their_proven_keys() {
+    let server = server().await;
+    let (mine, theirs) = (HostKey::new(), HostKey::new());
+    assert_eq!(attached(&server, "bob@x").await, json!({ "hosts": [] }));
+
+    let host = FakeHost::connect(&server, &mine, "bob@x").await;
+    let _other = FakeHost::connect(&server, &theirs, "alice@y").await;
+    assert_eq!(
+        attached(&server, "bob@x").await,
+        json!({ "hosts": [{ "id": mine.id, "key": mine.public }] })
+    );
+    assert_eq!(
+        attached(&server, "alice@y").await,
+        json!({ "hosts": [{ "id": theirs.id, "key": theirs.public }] })
+    );
+
+    // A host that detaches is no longer offered.
+    drop(host);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while server.state.host_relay.is_online(&mine.id) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the dropped stream detaches");
+    assert_eq!(attached(&server, "bob@x").await, json!({ "hosts": [] }));
+}
+
 #[tokio::test]
 async fn offline_timeout_replacement_and_overload_fail_honestly() {
     let server = server().await;

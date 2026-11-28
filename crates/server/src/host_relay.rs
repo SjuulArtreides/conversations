@@ -59,6 +59,8 @@ struct Channel {
     generation: u64,
     /// The account that attached (counts toward its host limit).
     owner: String,
+    /// The public key the attachment proved possession of (id = its SHA-256).
+    public: String,
     /// Required on replies; known only to whoever holds the proven stream.
     token: String,
     to_host: mpsc::Sender<RelayEnvelope>,
@@ -231,6 +233,7 @@ impl HostRelay {
         self: &Arc<Self>,
         owner: &str,
         host_id: &str,
+        public: &str,
     ) -> Result<(HostStream, String), RelayError> {
         let key = host_id.to_owned();
         let mut inner = self.inner.lock().expect("host relay mutex poisoned");
@@ -256,6 +259,7 @@ impl HostRelay {
             Channel {
                 generation,
                 owner: owner.to_owned(),
+                public: public.to_owned(),
                 token: token.clone(),
                 to_host,
                 pending: HashMap::new(),
@@ -270,6 +274,19 @@ impl HostRelay {
             },
             token,
         ))
+    }
+
+    /// The hosts `owner` has attached right now, as `(id, public key)`.
+    pub fn attached_by(&self, owner: &str) -> Vec<(String, String)> {
+        let inner = self.inner.lock().expect("host relay mutex poisoned");
+        let mut hosts: Vec<_> = inner
+            .hosts
+            .iter()
+            .filter(|(_, channel)| channel.owner == owner)
+            .map(|(id, channel)| (id.clone(), channel.public.clone()))
+            .collect();
+        hosts.sort();
+        hosts
     }
 
     pub fn is_online(&self, host_id: &str) -> bool {
@@ -429,7 +446,9 @@ pub async fn stream(
     if !fresh || !proves_host(&host_id, &proof.public, &proof.nonce, &proof.sig) {
         return Err(RelayError::BadRequest("host identity proof failed"));
     }
-    let (mut host, token) = state.host_relay.attach(&owner_of(viewer), &host_id)?;
+    let (mut host, token) = state
+        .host_relay
+        .attach(&owner_of(viewer), &host_id, &proof.public)?;
     let (tx, rx) = mpsc::channel::<Event>(QUEUE);
     let first = serde_json::json!({"type": "attached", "reply_token": token}).to_string();
     let _ = tx.send(Event::default().data(first)).await;
@@ -503,12 +522,33 @@ pub async fn status(
     })))
 }
 
+/// `GET /api/host-relay` -> `{ "hosts": [{ "id", "key" }] }`: the hosts the
+/// caller's own account has attached. Each key was proven at attach time. A
+/// browser uses this only to find which of its account's machines to ask
+/// whether they approved its key; the host's signed answer decides.
+pub async fn attached(
+    State(state): State<AppState>,
+    CurrentUser(viewer): CurrentUser,
+) -> Json<serde_json::Value> {
+    if viewer.is_none() && state.config.auth_enabled {
+        return Json(json!({ "hosts": [] }));
+    }
+    let hosts: Vec<_> = state
+        .host_relay
+        .attached_by(&owner_of(viewer))
+        .into_iter()
+        .map(|(id, key)| json!({ "id": id, "key": key }))
+        .collect();
+    Json(json!({ "hosts": hosts }))
+}
+
 /// The relay's routes. Registered once, from `api::routes`.
 pub fn routes() -> axum::Router<AppState> {
     use axum::extract::DefaultBodyLimit;
     use axum::routing::{get, post};
     use conversations_core::host_relay::MAX_REQUEST_BYTES;
     axum::Router::new()
+        .route("/api/host-relay", get(attached))
         .route("/api/host-relay/{host_id}/stream", get(stream))
         .route("/api/host-relay/{host_id}/status", get(status))
         .route("/api/host-relay/{host_id}/challenge", post(challenge))
