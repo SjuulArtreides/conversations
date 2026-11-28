@@ -25,7 +25,7 @@ RUN npm run build
 # Output: /app/frontend/dist
 
 # ---------- Stage 2: build the Rust server (static musl) ----------
-FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS backend
+FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS rust-base
 WORKDIR /app
 # musl-tools provides musl-gcc, used both to link the static binary and to
 # compile the bundled SQLite C (libsqlite3-sys) and ring's C/asm against musl.
@@ -49,8 +49,28 @@ ENV CC_aarch64_unknown_linux_musl=musl-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static"
 # On x86-64, Rust supplies the self-contained musl startup objects to the
 # normal compiler driver. musl-gcc's linker specs interfere with static PIE.
-# Copy the workspace and build the server binary in release.
-COPY Cargo.toml Cargo.lock* ./
+# Compile dependencies in a layer keyed by the Cargo recipe. The recipe
+# ignores source edits and workspace version bumps.
+FROM rust-base AS chef
+# renovate: datasource=crate depName=cargo-chef
+ARG CARGO_CHEF_VERSION=0.1.78
+RUN cargo install --locked --version "$CARGO_CHEF_VERSION" cargo-chef
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+COPY vendor/ ./vendor/
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS backend
+COPY --from=planner /app/recipe.json ./
+# The workspace patches crates.io with a vendored copy of vt100.
+COPY vendor/ ./vendor/
+RUN target="$(cat /rust-target)" && \
+    cargo chef cook --locked --release --target "$target" --bin conversations-server --recipe-path recipe.json
+
+# Restore the real workspace sources and manifests for the production build.
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY vendor/ ./vendor/
 # reqwest/sqlx use rustls (AWS-LC/ring, no OpenSSL). SQLite is bundled C.
