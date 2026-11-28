@@ -9,7 +9,7 @@ const id = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEFG";
 beforeEach(() => {
   vi.clearAllMocks();
 });
-it("requires the laptop owner to match the phone's code before approving its exact registration", async () => {
+it("shows a pending device with setup closed and approves its exact registration in one click", async () => {
   vi.mocked(localRequest).mockImplementation(async (path) => {
     if (path === "/api/devices/pending")
       return {
@@ -27,15 +27,9 @@ it("requires the laptop owner to match the phone's code before approving its exa
   });
   const user = userEvent.setup();
   renderWithProviders(<DeviceSetup />);
-  await user.click(screen.getByRole("button", { name: "Add a device" }));
-  await user.click(screen.getByRole("button", { name: "Create setup code" }));
   expect(await screen.findByText("Device waiting for approval")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Create setup code" })).not.toBeInTheDocument();
   const approve = screen.getByRole("button", { name: "Approve device" });
-  expect(approve).toBeDisabled();
-  await user.type(
-    screen.getByLabelText("Enter the matching code"),
-    id.slice(-12),
-  );
   expect(approve).toBeEnabled();
   await user.click(approve);
   await waitFor(() =>

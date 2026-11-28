@@ -10,12 +10,10 @@ export function DeviceSetup() {
   const [open, setOpen] = React.useState(false);
   const [link, setLink] = React.useState("");
   const [message, setMessage] = React.useState("");
-  const [code, setCode] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const pending = useQuery({
     queryKey: ["device-pending"],
     queryFn: () => localRequest<{ devices: Pending[] }>("/api/devices/pending"),
-    enabled: open,
     refetchInterval: 3000,
     retry: false,
   });
@@ -62,7 +60,6 @@ export function DeviceSetup() {
         method: "POST",
         body: JSON.stringify({ cred_id }),
       });
-      setCode("");
       setMessage(
         approve
           ? "Device approved. Continue on your phone."
@@ -75,6 +72,7 @@ export function DeviceSetup() {
       setBusy(false);
     }
   };
+  const devices = pending.data?.devices ?? [];
   return (
     <section id="devices" className="space-y-3 border-b border-border/60 pb-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -88,9 +86,9 @@ export function DeviceSetup() {
           {open ? "Close device setup" : "Add a device"}
         </Button>
       </div>
-      {open && (
+      {(open || devices.length > 0 || message) && (
         <div className="space-y-4 rounded-lg border border-border p-4 text-sm">
-          {!link && (
+          {open && !link && (
             <>
               <p>Start a short-lived setup link, then open it on your phone.</p>
               <Button onClick={() => void start()} disabled={busy}>
@@ -98,7 +96,7 @@ export function DeviceSetup() {
               </Button>
             </>
           )}
-          {link && (
+          {open && link && (
             <>
               <p>Scan this code with your phone. Keep this link private.</p>
               <div className="inline-block max-w-full rounded-lg bg-white p-3">
@@ -124,7 +122,7 @@ export function DeviceSetup() {
               </div>
             </>
           )}
-          {pending.data?.devices.map((device) => (
+          {devices.map((device) => (
             <div
               key={device.cred_id}
               className="space-y-2 rounded-lg border border-primary/40 p-3"
@@ -142,18 +140,9 @@ export function DeviceSetup() {
                 Approval lets this device read private sessions, type in
                 terminals, and start or reopen sessions.
               </p>
-              <label className="block">
-                Enter the matching code
-                <input
-                  className="mt-1 block w-full rounded border border-input bg-background p-2"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  autoComplete="off"
-                />
-              </label>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={busy || code.trim() !== device.cred_id.slice(-12)}
+                  disabled={busy}
                   onClick={() => void decide(device.cred_id, true)}
                 >
                   Approve device
@@ -168,7 +157,7 @@ export function DeviceSetup() {
               </div>
             </div>
           ))}
-          {link && !pending.data?.devices.length && (
+          {open && link && devices.length === 0 && (
             <p className="text-muted-foreground">
               Waiting for your phone to create its passkey…
             </p>
