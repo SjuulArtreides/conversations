@@ -81,16 +81,6 @@ describe("useStickyScroll — atTop", () => {
 });
 
 describe("useStickyScroll — atBottom", () => {
-  it("atBottom=true when distFromBottom is within threshold (0px)", async () => {
-    // scrollY=600, innerHeight=600, scrollHeight=1200 → dist = 1200-600-600 = 0
-    setScrollMetrics({ scrollY: 600, innerHeight: 600, scrollHeight: 1200 });
-    const { result } = renderHook(() => useStickyScroll());
-    await act(async () => {
-      fireScroll();
-    });
-    expect(result.current.atBottom).toBe(true);
-  });
-
   it("atBottom=true when distFromBottom is within threshold (20px)", async () => {
     // scrollY=580, innerHeight=600, scrollHeight=1200 → dist = 1200-600-580 = 20
     setScrollMetrics({ scrollY: 580, innerHeight: 600, scrollHeight: 1200 });

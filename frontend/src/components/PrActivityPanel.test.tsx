@@ -384,19 +384,26 @@ describe("PrActivityPanel", () => {
   });
 
   it("syncs PR messages shortly after a delivered reply", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<PrActivityPanel id="s1" viewerIsAuthor={true} />);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({
+        advanceTimers: vi.advanceTimersByTime,
+      });
+      renderWithProviders(<PrActivityPanel id="s1" viewerIsAuthor={true} />);
 
-    const box = await screen.findByRole("textbox", { name: /reply to pr/i });
-    await user.type(box, "Done, renamed.");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
+      const box = await screen.findByRole("textbox", { name: /reply to pr/i });
+      await user.type(box, "Done, renamed.");
+      await user.click(screen.getByRole("button", { name: /^send$/i }));
 
-    await waitFor(() => expect(api.replyToPr).toHaveBeenCalled());
-    // The sync is deferred (~2s), never fired synchronously with the reply.
-    expect(api.syncPrs).not.toHaveBeenCalled();
-    await waitFor(() => expect(api.syncPrs).toHaveBeenCalledWith("s1"), {
-      timeout: 3000,
-    });
+      await waitFor(() => expect(api.replyToPr).toHaveBeenCalled());
+      expect(api.syncPrs).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(api.syncPrs).toHaveBeenCalledWith("s1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does NOT sync when the reply is interrupted (no CLI attached)", async () => {

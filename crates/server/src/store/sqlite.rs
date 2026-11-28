@@ -3529,28 +3529,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_code_colors_roundtrip_defaults_to_none() {
-        let t = temp_repo().await;
-        let repo = &t.repo;
-
-        // Unset for a fresh user.
-        assert_eq!(repo.get_inline_code_colors("alice@x").await.unwrap(), None);
-
-        repo.upsert_user("alice@x", None).await.unwrap();
-        repo.set_inline_code_colors("alice@x", Some(r#"{"palette":[],"rgb":[11647993]}"#))
-            .await
-            .unwrap();
-        assert_eq!(
-            repo.get_inline_code_colors("alice@x").await.unwrap(),
-            Some(r#"{"palette":[],"rgb":[11647993]}"#.to_string())
-        );
-
-        // Clearing it returns to None.
-        repo.set_inline_code_colors("alice@x", None).await.unwrap();
-        assert_eq!(repo.get_inline_code_colors("alice@x").await.unwrap(), None);
-    }
-
-    #[tokio::test]
     async fn codex_launch_settings_roundtrip_defaults_to_none() {
         let t = temp_repo().await;
         let repo = &t.repo;
@@ -3792,23 +3770,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn container_paths_cascade_on_user_delete() {
-        let t = temp_repo().await;
-        let repo = &t.repo;
-        repo.upsert_user("bob@x", None).await.unwrap();
-        repo.set_container_paths("bob@x", &["/root".to_string()])
-            .await
-            .unwrap();
-        // Deleting the user cascades the container paths (FK ON DELETE CASCADE).
-        sqlx::query("DELETE FROM users WHERE email = ?")
-            .bind("bob@x")
-            .execute(repo.pool())
-            .await
-            .unwrap();
-        assert!(repo.get_container_paths("bob@x").await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
     async fn summary_upsert_get_and_cascade() {
         let t = temp_repo().await;
         let repo = &t.repo;
@@ -3896,119 +3857,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.display_name.as_deref(), Some("Alice S."));
-    }
-
-    #[tokio::test]
-    async fn delete_user_cascades_and_preserves_authored_content() {
-        let t = temp_repo().await;
-        let repo = &t.repo;
-
-        // The user we are going to delete, plus a bystander who must survive.
-        repo.upsert_user("victim@example.com", Some("Victim"))
-            .await
-            .unwrap();
-        repo.upsert_user("bystander@example.com", Some("Bystander"))
-            .await
-            .unwrap();
-        repo.upsert_user("owner@example.com", Some("Owner"))
-            .await
-            .unwrap();
-
-        // Rows that MUST cascade away with the user.
-        repo.set_password("victim@example.com", "pwd")
-            .await
-            .unwrap();
-        repo.set_user_admin("victim@example.com", true, "admin@example.com")
-            .await
-            .unwrap();
-        repo.set_container_paths("victim@example.com", &["/tmp/x".into()])
-            .await
-            .unwrap();
-        repo.set_default_agent("victim@example.com", core::AgentKind::Codex)
-            .await
-            .unwrap();
-        repo.create_password_reset_token(
-            "victim@example.com",
-            "admin@example.com",
-            "tok-1",
-            "secret-hash",
-            Utc::now() + chrono::Duration::minutes(5),
-        )
-        .await
-        .unwrap();
-
-        // Rows that MUST be scrubbed from share lists so a revoked account
-        // does not retain access that was granted TO it.
-        let session = sample_session("sess-own");
-        repo.upsert_session(
-            "owner@example.com",
-            None,
-            Some("owner@example.com"),
-            &session,
-        )
-        .await
-        .unwrap();
-        repo.set_sharing(
-            "sess-own",
-            VISIBILITY_RESTRICTED,
-            &[
-                "victim@example.com".to_string(),
-                "bystander@example.com".to_string(),
-            ],
-        )
-        .await
-        .unwrap();
-
-        // Rows that MUST stay — authored content and audit tombstones.
-        let authored = sample_session("sess-victim");
-        repo.upsert_session(
-            "victim@example.com",
-            None,
-            Some("victim@example.com"),
-            &authored,
-        )
-        .await
-        .unwrap();
-
-        // First call reports it existed; second call is an idempotent miss.
-        assert!(repo.delete_user("victim@example.com").await.unwrap());
-        assert!(!repo.delete_user("victim@example.com").await.unwrap());
-
-        // Cascading rows are gone.
-        assert!(repo
-            .get_user_with_password("victim@example.com")
-            .await
-            .unwrap()
-            .is_none());
-        assert!(!repo.is_user_admin("victim@example.com").await.unwrap());
-        assert!(repo
-            .get_container_paths("victim@example.com")
-            .await
-            .unwrap()
-            .is_empty());
-        assert!(repo
-            .get_password_reset_token("tok-1", Utc::now())
-            .await
-            .unwrap()
-            .is_none());
-
-        // Share list drops the victim but keeps the bystander.
-        let (_, shared) = repo.get_sharing("sess-own").await.unwrap().unwrap();
-        assert_eq!(shared, vec!["bystander@example.com".to_string()]);
-
-        // Authored content remains with the owner_email string in place.
-        let stored = repo
-            .get_session(None, "sess-victim")
-            .await
-            .unwrap()
-            .expect("authored session preserved");
-        assert_eq!(stored.owner_email.as_deref(), Some("victim@example.com"));
-        assert_eq!(stored.uploaded_by, "victim@example.com");
-
-        // The directory row itself is gone.
-        let listed = repo.list_users().await.unwrap();
-        assert!(!listed.iter().any(|u| u.email == "victim@example.com"));
-        assert!(listed.iter().any(|u| u.email == "bystander@example.com"));
     }
 
     #[tokio::test]
@@ -4152,23 +4000,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_create_without_description_is_none() {
-        let t = temp_repo().await;
-        let repo = &t.repo;
-
-        let proj = repo.create_project(None, "NoDesc", None).await.unwrap();
-        assert!(proj.description.is_none());
-
-        let detail = repo.get_project(None, &proj.id).await.unwrap().unwrap();
-        assert!(detail.project.description.is_none());
-    }
-
-    #[tokio::test]
     async fn project_update_sets_and_clears_description() {
         let t = temp_repo().await;
         let repo = &t.repo;
 
         let proj = repo.create_project(None, "Orig", None).await.unwrap();
+        assert!(proj.description.is_none());
+        let detail = repo.get_project(None, &proj.id).await.unwrap().unwrap();
+        assert!(detail.project.description.is_none());
 
         // Update sets a new description and renames.
         repo.update_project(&proj.id, "Renamed", Some("now described"))

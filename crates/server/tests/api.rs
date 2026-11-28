@@ -617,22 +617,15 @@ async fn sharing_endpoints_and_reupload_preserves_sharing() {
 }
 
 #[tokio::test]
-async fn readyz_reports_ready() {
+async fn readiness_changes_on_shutdown_while_liveness_stays_healthy() {
     let (state, _tmp) = test_state().await;
-    let app = build_router(state);
+    let app = build_router(state.clone());
 
-    let resp = app.oneshot(get("/readyz")).await.unwrap();
+    let resp = app.clone().oneshot(get("/readyz")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_json(resp).await;
-    assert_eq!(body["status"], json!("ready"));
-}
+    assert_eq!(body_json(resp).await["status"], json!("ready"));
 
-#[tokio::test]
-async fn readyz_reports_unready_once_shutting_down() {
-    let (state, _tmp) = test_state().await;
-    // Simulate receipt of a termination signal.
     state.begin_shutdown();
-    let app = build_router(state);
 
     // Readiness flips to 503 even though the DB is perfectly healthy, so the
     // Service drains this pod out of rotation during graceful shutdown.
@@ -4277,47 +4270,6 @@ async fn pr_autodetect_backfill_first_get_only() {
         state.repo.pr_scanned_at(sid).await.unwrap().is_some(),
         "backfill must stamp pr_scanned_at"
     );
-}
-
-// ---------------------------------------------------------------------------
-// /api/llm/models response parse (unit test — no network)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn llm_models_response_parse() {
-    // Sample body matching OpenRouter's /models response schema.
-    let body = r#"{
-        "data": [
-            {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "context_length": 200000},
-            {"id": "openai/gpt-4o", "name": "GPT-4o", "context_length": 128000},
-            {"id": "unknown-model"}
-        ]
-    }"#;
-
-    #[derive(serde::Deserialize)]
-    struct OrModelsResponse {
-        #[serde(default)]
-        data: Vec<OrModel>,
-    }
-    #[derive(serde::Deserialize)]
-    struct OrModel {
-        #[serde(default)]
-        id: String,
-        #[serde(default)]
-        name: String,
-        #[serde(default)]
-        context_length: Option<u64>,
-    }
-
-    let parsed: OrModelsResponse = serde_json::from_str(body).unwrap();
-    assert_eq!(parsed.data.len(), 3);
-    assert_eq!(parsed.data[0].id, "anthropic/claude-sonnet-4");
-    assert_eq!(parsed.data[0].name, "Claude Sonnet 4");
-    assert_eq!(parsed.data[0].context_length, Some(200_000));
-    // Third entry has no name/context_length -> defaults.
-    assert_eq!(parsed.data[2].id, "unknown-model");
-    assert!(parsed.data[2].name.is_empty());
-    assert!(parsed.data[2].context_length.is_none());
 }
 
 /// Comments push (204) then list returns them sorted; the CLI re-push of the

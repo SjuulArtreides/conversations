@@ -125,6 +125,7 @@ async fn exercise(repo: Arc<dyn Repository>) {
         .unwrap()
         .expect("authored session preserved");
     assert_eq!(stored.owner_email.as_deref(), Some("victim@example.com"));
+    assert_eq!(stored.uploaded_by, "victim@example.com");
 
     let listed = repo.list_users().await.unwrap();
     assert!(!listed.iter().any(|u| u.email == "victim@example.com"));

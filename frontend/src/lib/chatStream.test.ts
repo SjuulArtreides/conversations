@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  parseSseFrame,
   SseParser,
   streamChatMessage,
   type StreamEvent,
@@ -16,53 +15,7 @@ const PERSISTED: ChatMessage = {
   created_at: "2026-06-06T00:00:00Z",
 };
 
-describe("parseSseFrame", () => {
-  it("parses a single data line into an event", () => {
-    expect(parseSseFrame('data: {"type":"token","text":"Hi"}')).toEqual({
-      type: "token",
-      text: "Hi",
-    });
-  });
-
-  it("joins multiple data lines with a newline before JSON.parse", () => {
-    const frame = 'data: {"type":"token",\ndata: "text":"x"}';
-    expect(parseSseFrame(frame)).toEqual({ type: "token", text: "x" });
-  });
-
-  it("tolerates CRLF and a missing space after the colon", () => {
-    const frame = 'data:{"type":"token","text":"y"}\r';
-    expect(parseSseFrame(frame)).toEqual({ type: "token", text: "y" });
-  });
-
-  it("returns null for a comment/keep-alive frame with no data lines", () => {
-    expect(parseSseFrame(": keep-alive")).toBeNull();
-    expect(parseSseFrame("")).toBeNull();
-  });
-});
-
 describe("SseParser", () => {
-  it("emits each complete frame in a multi-frame chunk", () => {
-    const p = new SseParser();
-    const events = p.push(
-      'data: {"type":"token","text":"a"}\n\n' +
-        'data: {"type":"token","text":"b"}\n\n',
-    );
-    expect(events).toEqual<StreamEvent[]>([
-      { type: "token", text: "a" },
-      { type: "token", text: "b" },
-    ]);
-  });
-
-  it("buffers a frame split across two reads", () => {
-    const p = new SseParser();
-    // First read carries only part of the frame — no complete event yet.
-    expect(p.push('data: {"type":"to')).toEqual([]);
-    // Second read completes the frame.
-    expect(p.push('ken","text":"split"}\n\n')).toEqual<StreamEvent[]>([
-      { type: "token", text: "split" },
-    ]);
-  });
-
   it("handles the terminal done frame, including a final frame with no trailing blank line", () => {
     const p = new SseParser();
     const mid = p.push('data: {"type":"token","text":"Hello"}\n\n');

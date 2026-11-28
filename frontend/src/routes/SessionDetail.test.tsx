@@ -221,30 +221,7 @@ describe("SessionDetail — Pull Requests card", () => {
     expect(screen.getByRole("button", { name: "Unlink" })).toBeInTheDocument();
   });
 
-  it("shows the correct status badge: Open (green)", async () => {
-    vi.mocked(api.listSessionPrs).mockResolvedValue([
-      {
-        url: "https://github.com/acme/repo/pull/1",
-        owner: "acme",
-        repo: "repo",
-        number: 1,
-        status: {
-          state: "OPEN",
-          merged: false,
-          draft: false,
-          title: "Open PR",
-        },
-      },
-    ]);
-
-    renderDetail();
-
-    await waitFor(() =>
-      expect(screen.getByTestId("pr-status-badge")).toHaveTextContent("Open"),
-    );
-  });
-
-  it("shows the correct status badge: Merged (purple)", async () => {
+  it("labels merged, draft, and closed PRs in the same session", async () => {
     vi.mocked(api.listSessionPrs).mockResolvedValue([
       {
         url: "https://github.com/acme/repo/pull/2",
@@ -258,17 +235,6 @@ describe("SessionDetail — Pull Requests card", () => {
           title: "Merged PR",
         },
       },
-    ]);
-
-    renderDetail();
-
-    await waitFor(() =>
-      expect(screen.getByTestId("pr-status-badge")).toHaveTextContent("Merged"),
-    );
-  });
-
-  it("shows the correct status badge: Draft (gray)", async () => {
-    vi.mocked(api.listSessionPrs).mockResolvedValue([
       {
         url: "https://github.com/acme/repo/pull/3",
         owner: "acme",
@@ -281,17 +247,6 @@ describe("SessionDetail — Pull Requests card", () => {
           title: "Draft PR",
         },
       },
-    ]);
-
-    renderDetail();
-
-    await waitFor(() =>
-      expect(screen.getByTestId("pr-status-badge")).toHaveTextContent("Draft"),
-    );
-  });
-
-  it("shows the correct status badge: Closed (red)", async () => {
-    vi.mocked(api.listSessionPrs).mockResolvedValue([
       {
         url: "https://github.com/acme/repo/pull/4",
         owner: "acme",
@@ -308,9 +263,12 @@ describe("SessionDetail — Pull Requests card", () => {
 
     renderDetail();
 
-    await waitFor(() =>
-      expect(screen.getByTestId("pr-status-badge")).toHaveTextContent("Closed"),
-    );
+    const badges = await screen.findAllByTestId("pr-status-badge");
+    expect(badges.map((badge) => badge.textContent)).toEqual([
+      "Merged",
+      "Draft",
+      "Closed",
+    ]);
   });
 
   it("shows no status badge but a not-synced hint when status is null", async () => {

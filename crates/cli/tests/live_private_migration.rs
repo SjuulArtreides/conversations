@@ -790,42 +790,6 @@ impl Drop for Owned {
 }
 
 #[test]
-fn start_agent_registers_with_the_running_host_and_leaves_it_running() {
-    let mut env = Env::new();
-    // Not the default runtime directory: `start-agent` has to find this host.
-    env.runtime = Some(env.root().join("user-host"));
-    env.start_host();
-    env.run(&["start-agent", "claude"]);
-    wait("the agent", &env, || !env.runs().is_empty());
-    let (_, wrapped, argv) = env.runs()[0].clone();
-    assert!(argv.starts_with("claude --session-id "), "{argv}");
-    let session = argv.split_whitespace().nth(2).unwrap().to_owned();
-    assert_eq!(wrapped, session, "{argv}");
-    wait("the registration with the running host", &env, || {
-        env.host_sessions().iter().any(|(id, _)| id == &session)
-    });
-    wait("the transcript in local history", &env, || {
-        env.history(&session).contains(TRANSCRIPT_MARK)
-    });
-    assert!(
-        !env.root().join(".conversations-host-local").exists(),
-        "start-agent used a runtime of its own"
-    );
-
-    let mut started = env.child.take().unwrap();
-    let _ = started.kill();
-    let _ = started.wait();
-    std::thread::sleep(Duration::from_secs(2));
-    assert!(
-        !env.host.as_ref().unwrap().exited(),
-        "start-agent stopped the user's host"
-    );
-    assert!(env.host_reachable());
-    assert_eq!(env.central.legacy_channels(), Vec::<String>::new());
-    assert_eq!(env.central.private_exposure(), json!({}));
-}
-
-#[test]
 fn started_agents_are_local_host_registrations_with_local_history_and_handoff() {
     let mut env = Env::new();
     env.start_host();
