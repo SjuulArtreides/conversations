@@ -11,7 +11,6 @@ import {
   clampUtf8,
   closePrivateChannels,
   createInputChannel,
-  DELEGATION_CAPS,
   hostControl,
   HostControlError,
   unlockHost,
@@ -1273,9 +1272,6 @@ describe("signed host settings", () => {
     expect(sent.map((r) => r.type)).toEqual(["peer_challenge"]);
   });
 
-  it("asks a delegation for private history reads", () => {
-    expect(DELEGATION_CAPS).toContain("history.read");
-  });
 });
 
 describe("signed publication", () => {

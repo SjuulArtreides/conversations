@@ -77,21 +77,7 @@ describe("ChatPanel", () => {
     expect(api.sessionChats).not.toHaveBeenCalled();
   });
 
-  it("lists the session's chat threads when LLM is enabled", async () => {
-    mockedLlm.mockReturnValue({
-      enabled: true,
-      model: "claude",
-      isLoading: false,
-    });
-    renderWithProviders(<ChatPanel parent={{ kind: "session", id: "s1" }} />);
-
-    expect(await screen.findByText("Deploy questions")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(api.sessionChats).toHaveBeenCalledWith("s1"),
-    );
-  });
-
-  it("opens a thread and shows its messages", async () => {
+  it("lists the session threads and opens the selected one", async () => {
     mockedLlm.mockReturnValue({
       enabled: true,
       model: "claude",
@@ -123,83 +109,31 @@ describe("ChatPanel", () => {
     renderWithProviders(<ChatPanel parent={{ kind: "session", id: "s1" }} />);
 
     await user.click(await screen.findByText("Deploy questions"));
+    expect(api.sessionChats).toHaveBeenCalledWith("s1");
     expect(await screen.findByText("How do I deploy?")).toBeInTheDocument();
     expect(screen.getByLabelText("Message")).toBeInTheDocument();
   });
 });
 
 describe("ChatPanel — docked variant", () => {
-  it("is collapsed by default: launcher visible, rail hidden", () => {
-    mockedLlm.mockReturnValue({ enabled: true, model: "claude", isLoading: false });
-    renderWithProviders(
-      <ChatPanel parent={{ kind: "session", id: "s1" }} docked />,
-    );
-    // Launcher button must be present.
-    expect(screen.getByTestId("chat-panel-launcher")).toBeInTheDocument();
-    // The rail (open panel) must not be rendered.
-    expect(screen.queryByTestId("chat-panel-rail")).not.toBeInTheDocument();
-  });
-
-  it("clicking the launcher opens the panel and hides the launcher", async () => {
+  it("opens and closes the docked panel and saves both states", async () => {
     mockedLlm.mockReturnValue({ enabled: true, model: "claude", isLoading: false });
     const user = userEvent.setup();
     renderWithProviders(
       <ChatPanel parent={{ kind: "session", id: "s1" }} docked />,
     );
 
-    await user.click(screen.getByTestId("chat-panel-launcher"));
+    expect(screen.queryByTestId("chat-panel-rail")).not.toBeInTheDocument();
 
-    // Rail is now present.
+    await user.click(screen.getByTestId("chat-panel-launcher"));
     expect(screen.getByTestId("chat-panel-rail")).toBeInTheDocument();
-    // Launcher is gone.
     expect(screen.queryByTestId("chat-panel-launcher")).not.toBeInTheDocument();
-    // Chat heading is visible inside the rail.
     expect(screen.getByText("Chat")).toBeInTheDocument();
-  });
+    expect(localStorage.getItem("conversations.chatPanelOpen")).toBe("true");
 
-  it("clicking the close button collapses the panel", async () => {
-    mockedLlm.mockReturnValue({ enabled: true, model: "claude", isLoading: false });
-    const user = userEvent.setup();
-    renderWithProviders(
-      <ChatPanel parent={{ kind: "session", id: "s1" }} docked />,
-    );
-
-    // Open it first.
-    await user.click(screen.getByTestId("chat-panel-launcher"));
-    expect(screen.getByTestId("chat-panel-rail")).toBeInTheDocument();
-
-    // Then close it.
     await user.click(screen.getByTestId("chat-panel-close"));
     expect(screen.queryByTestId("chat-panel-rail")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-panel-launcher")).toBeInTheDocument();
-  });
-
-  it("persists open state to localStorage when opened", async () => {
-    mockedLlm.mockReturnValue({ enabled: true, model: "claude", isLoading: false });
-    const user = userEvent.setup();
-    renderWithProviders(
-      <ChatPanel parent={{ kind: "session", id: "s1" }} docked />,
-    );
-
-    await user.click(screen.getByTestId("chat-panel-launcher"));
-
-    expect(localStorage.getItem("conversations.chatPanelOpen")).toBe("true");
-  });
-
-  it("persists closed state to localStorage when closed", async () => {
-    mockedLlm.mockReturnValue({ enabled: true, model: "claude", isLoading: false });
-    // Pre-open the panel via localStorage so we start open.
-    localStorage.setItem("conversations.chatPanelOpen", "true");
-    const user = userEvent.setup();
-    renderWithProviders(
-      <ChatPanel parent={{ kind: "session", id: "s1" }} docked />,
-    );
-
-    // Should start open.
-    expect(screen.getByTestId("chat-panel-rail")).toBeInTheDocument();
-
-    await user.click(screen.getByTestId("chat-panel-close"));
-
     expect(localStorage.getItem("conversations.chatPanelOpen")).toBe("false");
   });
 
@@ -275,12 +209,6 @@ describe("ChatPanel — PR detection in chat bubbles", () => {
     const user = userEvent.setup();
     await openChatWithPrMessage(user);
     expect(screen.getByTestId("pr-chip")).toBeInTheDocument();
-  });
-
-  it("shows a Link button for unlinked PRs in session-parented chats", async () => {
-    const user = userEvent.setup();
-    await openChatWithPrMessage(user);
-    expect(screen.getByTestId("pr-link-button")).toBeInTheDocument();
   });
 
   it("calls api.linkSessionPr when the Link button is clicked", async () => {
@@ -375,12 +303,6 @@ describe("ChatPanel — model picker", () => {
     // Wait for thread view to be visible (Message input appears).
     await screen.findByLabelText("Message");
   };
-
-  it("renders the model picker trigger in the thread view", async () => {
-    const user = userEvent.setup();
-    await openThreadView(user);
-    expect(screen.getByTestId("model-picker-trigger")).toBeInTheDocument();
-  });
 
   it("defaults the model picker to the LLM status model", async () => {
     const user = userEvent.setup();

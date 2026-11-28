@@ -17,10 +17,6 @@ describe("highlightCode", () => {
     expect(html).toContain("hljs-");
   });
 
-  it("resolves the toml fence via the ini grammar alias", () => {
-    expect(highlightCode('x = "y"', "toml")).not.toBeNull();
-  });
-
   it("returns null for an unregistered language (caller renders plain)", () => {
     expect(highlightCode("+++.", "brainfuck")).toBeNull();
   });

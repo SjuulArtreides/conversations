@@ -45,7 +45,6 @@ const LATE: &str = "offlinesecretokapi";
 const TAMPERED: &str = "tamperedsecretquokka";
 const STOLEN: &str = "substitutedsecretdugong";
 const REVOKED: &str = "revokedsecretsaola";
-const EXPIRED: &str = "expiredsecretbilby";
 const GRANTED: &str = "grantedsecretnumbat";
 const UNGRANTED: &str = "ungrantedsecretquoll";
 const TURN_USER: &str = "loopback";
@@ -238,86 +237,8 @@ async fn journey(mode: Mode, _turn: Option<&Turn>) {
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(occurrences(&b.stdin_of(T), LOST), 1);
 
-    // 4b. Lost answer, then expiry: retry must neither resend nor silently
-    //     query B. The caller explicitly checks status before deciding whether
-    //     a new idempotency key is appropriate. Here B already received it.
-    std::fs::write(drop_dir.join("drop"), b"once").unwrap();
-    let expired_text = format!("third {EXPIRED}");
-    let error = sender
-        .send_message(T, &expired_text, "k8", None)
-        .await
-        .expect_err("a dropped answer must not read as success");
-    assert!(error.contains("no signed answer"), "{error}");
-    assert!(!drop_dir.join("drop").exists(), "the drop hook never fired");
-    wait_until("the expiring message typed into T", 90, || {
-        b.stdin_of(T).contains(EXPIRED)
-    })
-    .await;
-    let stored = || -> (String, Vec<u8>, Vec<u8>) {
-        rusqlite::Connection::open_with_flags(
-            a.runtime.join("authz.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .unwrap()
-        .query_row(
-            "SELECT message_id,payload,sig FROM agent_sends
-             WHERE source_session=?1 AND target_session=?2 AND idem='k8'",
-            [S, T],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap()
-    };
-    let before = stored();
-    tokio::time::sleep(Duration::from_secs(62)).await;
-    let relay_path = format!("/api/host-relay/{b_id}/request");
-    let requests = central.recorded.lines(&relay_path).len();
-    let unknown = sender
-        .send_message(T, &expired_text, "k8", None)
-        .await
-        .expect_err("an expired unanswered send requires explicit status");
-    assert!(
-        unknown.contains("delivery unknown")
-            && unknown.contains(&before.0)
-            && unknown.contains("messages_status"),
-        "{unknown}"
-    );
-    assert_eq!(
-        central.recorded.lines(&relay_path).len(),
-        requests,
-        "expired retry made a network request"
-    );
-    assert_eq!(
-        stored(),
-        before,
-        "expired retry changed the signed operation"
-    );
-    let status = sender.status(&before.0).await.unwrap();
-    assert!(
-        ["queued", "received", "acknowledged"].contains(&status["status"].as_str().unwrap()),
-        "{status}"
-    );
-    assert_eq!(status["stale"], false, "{status}");
-    let requests = central.recorded.lines(&relay_path).len();
-    let recovered = sender
-        .send_message(T, &expired_text, "k8", None)
-        .await
-        .unwrap();
-    assert_eq!(recovered["id"], before.0);
-    assert_eq!(
-        central.recorded.lines(&relay_path).len(),
-        requests,
-        "retry after explicit status resent the known message"
-    );
-    assert_eq!(stored(), before);
-    assert_eq!(
-        b.authz_count(&format!(
-            "SELECT COUNT(*) FROM agent_inbox WHERE message_id='{}'",
-            before.0
-        )),
-        1
-    );
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert_eq!(occurrences(&b.stdin_of(T), EXPIRED), 1);
+    // The daemon test retries_reuse_the_stored_envelope_but_expiry_requires_explicit_status_or_a_new_key
+    // covers expiry and status recovery using the test clock.
 
     // 5. B's owner removes ONE session grant (the key stays trusted): U was
     //    reachable, now B signs a refusal for it, nothing more is typed into U,
@@ -433,7 +354,7 @@ async fn journey(mode: Mode, _turn: Option<&Turn>) {
     s_delivery.close().await;
 
     for needle in [
-        SECRET, REPLY, LOST, EXPIRED, GRANTED, UNGRANTED, TAMPERED, STOLEN, REVOKED, LATE,
+        SECRET, REPLY, LOST, GRANTED, UNGRANTED, TAMPERED, STOLEN, REVOKED, LATE,
     ] {
         let leaks = central.recorded.containing(needle);
         assert!(leaks.is_empty(), "central saw {needle}: {leaks:?}");

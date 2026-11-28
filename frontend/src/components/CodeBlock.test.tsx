@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CodeBlock } from "./CodeBlock";
 
@@ -62,36 +62,33 @@ describe("CodeBlock", () => {
   });
 
   it("flashes a Copied confirmation with a checkmark after copying", async () => {
-    // userEvent.setup installs a working clipboard stub on navigator that
-    // resolves writeText, so clicking exercises the real onCopy path.
-    const user = userEvent.setup();
-    const { container } = render(
-      <CodeBlock language="ts" code={"const x = 1;"} />,
-    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      userEvent.setup();
+      const { container } = render(
+        <CodeBlock language="ts" code={"const x = 1;"} />,
+      );
 
-    const button = screen.getByRole("button", { name: "Copy code" });
-    // Initially there is no checkmark icon.
-    expect(container.querySelector("svg")).toBeNull();
+      const button = screen.getByRole("button", { name: "Copy code" });
+      expect(container.querySelector("svg")).toBeNull();
 
-    await user.click(button);
+      await act(async () => {
+        fireEvent.click(button);
+      });
+      await expect(navigator.clipboard.readText()).resolves.toBe("const x = 1;");
 
-    // The copied text was written to the clipboard.
-    await expect(navigator.clipboard.readText()).resolves.toBe("const x = 1;");
+      expect(screen.getByRole("button", { name: "Copied" })).toHaveTextContent(
+        "Copied",
+      );
+      expect(container.querySelector("svg")).not.toBeNull();
 
-    // Confirmation state: accessible name flips and a checkmark renders.
-    const confirmed = await screen.findByRole("button", { name: "Copied" });
-    expect(confirmed).toHaveTextContent("Copied");
-    expect(container.querySelector("svg")).not.toBeNull();
-
-    // Reverts to the idle Copy state after the ~1.5s timeout.
-    await waitFor(
-      () => {
-        expect(
-          screen.getByRole("button", { name: "Copy code" }),
-        ).toBeInTheDocument();
-      },
-      { timeout: 2000 },
-    );
-    expect(container.querySelector("svg")).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(screen.getByRole("button", { name: "Copy code" })).toBe(button);
+      expect(container.querySelector("svg")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

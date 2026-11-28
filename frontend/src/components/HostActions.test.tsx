@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
@@ -278,23 +278,29 @@ describe("StartNewSessionButton", () => {
       sessionId: "new-stalled",
     });
     mockedPrivateRead.mockImplementation(() => new Promise(() => {}));
-    const user = userEvent.setup();
-    renderWithProviders(<StartNewSessionButton />);
-    await user.click(
-      screen.getByRole("button", { name: /start new session/i }),
-    );
-    await waitFor(
-      () =>
-        expect(
-          screen.getByText(/host accepted the signed request/),
-        ).toBeInTheDocument(),
-      { timeout: 17_000 },
-    );
-    expect(mockedStartNew).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByRole("button", { name: /start new session/i }),
-    ).not.toBeDisabled();
-  }, 20_000);
+    vi.useFakeTimers();
+    try {
+      renderWithProviders(<StartNewSessionButton />);
+      const start = screen.getByRole("button", { name: /start new session/i });
+      await act(async () => {
+        fireEvent.click(start);
+      });
+      expect(start).toBeDisabled();
+      expect(mockedPrivateRead).toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(
+        screen.getByText(/host accepted the signed request/),
+      ).toBeInTheDocument();
+      expect(mockedStartNew).toHaveBeenCalledTimes(1);
+      expect(start).not.toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("recovers from a transient readiness read without starting another session", async () => {
     pairedHostsState.active = "host-retry";
