@@ -44,7 +44,7 @@ const DELIVERED_OK =
 /** Toast text for a failed signed host request, with the way forward. */
 function hostErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof HostControlError) {
-    if (err.code === "not_paired") return `${err.message} (Settings → Hosts)`;
+    if (err.code === "not_paired") return err.message;
     return err.message;
   }
   return err instanceof ApiError

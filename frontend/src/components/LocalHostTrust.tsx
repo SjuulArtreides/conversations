@@ -19,6 +19,9 @@ interface LocalStatus {
   }>;
 }
 
+/** How often the local page looks for keys your account newly published. */
+export const WAITING_KEYS_POLL_MS = 5000;
+
 // PR refresh (pr.sync / pr.unlink) is no longer its own permission:
 // `session.write` — the capability that lets a key drive a session's
 // terminal — also lets it refresh that session's linked pull requests.
@@ -97,6 +100,16 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     queryFn: () => localRequest<LocalStatus>("/api/status"),
     enabled: local,
   });
+  const waiting = useQuery({
+    queryKey: ["local-host-waiting-keys"],
+    queryFn: () =>
+      localRequest<{ email: string; keys: PublishedBrowserKey[] }>(
+        "/api/waiting-keys",
+      ),
+    enabled: local,
+    refetchInterval: WAITING_KEYS_POLL_MS,
+    retry: false,
+  });
   const directory = useQuery({
     queryKey: ["host-trust-directory", remoteHost?.id, query],
     queryFn: () =>
@@ -130,6 +143,7 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     onSuccess: () => {
       setCompared(false);
       void cache.invalidateQueries({ queryKey: ["local-host-status"] });
+      void cache.invalidateQueries({ queryKey: ["local-host-waiting-keys"] });
     },
   });
   const upgrade = useMutation({
@@ -153,6 +167,20 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
     // pr_sync cap MUST NOT silently promote formerly-refresh-only trust
     // to full terminal control.
     setGrants(["history.read"]);
+    trust.reset();
+  }
+
+  /**
+   * A key your own account published: open the same comparison step, with
+   * every permission preselected (it is your browser). Nothing is granted
+   * until you compare the fingerprint and choose Trust public key.
+   */
+  function reviewWaitingKey(email: string, key: PublishedBrowserKey) {
+    setAddOpen(true);
+    setSelected({ email, key: { ...key } });
+    setLabel(key.label.slice(0, 64));
+    setCompared(false);
+    setGrants(permissions.map(([cap]) => cap));
     trust.reset();
   }
 
@@ -209,6 +237,44 @@ export function LocalHostTrust({ remoteHost }: { remoteHost?: { id: string; labe
           message={status.error.message}
           onRetry={() => void status.refetch()}
         />
+      )}
+
+      {waiting.data && waiting.data.keys.length > 0 && (
+        <div className="space-y-3" aria-labelledby="local-trust-waiting-heading">
+          <h3 id="local-trust-waiting-heading" className="text-sm font-semibold">
+            Waiting for approval
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Browsers signed in as {waiting.data.email} published these keys.
+            Approve one only if its fingerprint matches the one that browser
+            shows.
+          </p>
+          <ul className="space-y-2">
+            {waiting.data.keys.map((key) => (
+              <li
+                key={key.kid}
+                className="rounded-lg border border-primary/40 p-3 space-y-2"
+              >
+                <p className="text-sm font-medium">{key.label}</p>
+                <code className="block break-all select-all text-xs">
+                  {key.kid}
+                </code>
+                <Button
+                  size="sm"
+                  disabled={trust.isPending}
+                  onClick={() => reviewWaitingKey(waiting.data.email, key)}
+                >
+                  Compare and trust
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {waiting.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {waiting.error.message}
+        </p>
       )}
 
       {status.data && (

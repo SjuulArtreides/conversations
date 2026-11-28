@@ -54,6 +54,8 @@ beforeEach(() => {
         credentials: [],
       } as never;
     if (path.startsWith("/api/users?")) return directory as never;
+    if (path === "/api/waiting-keys")
+      return { email: "me@example.com", keys: [] } as never;
     if (path === "/api/trust") return { kid: first.kid } as never;
     throw new Error("Unexpected local endpoint");
   });
@@ -344,4 +346,68 @@ it("submits only the compared published key and selected permissions for the cho
     lookup.mockRestore();
     trust.mockRestore();
   }
+});
+
+describe("browser keys waiting for approval", () => {
+  it("lists your account's unapproved keys and trusts one only after you compare it", async () => {
+    const user = userEvent.setup();
+    const base = vi.mocked(localRequest).getMockImplementation()!;
+    vi.mocked(localRequest).mockImplementation(async (path, init) => {
+      if (path === "/api/waiting-keys")
+        return { email: "me@example.com", keys: [first] } as never;
+      return base(path, init);
+    });
+    renderWithProviders(<LocalHostTrust />);
+
+    expect(await screen.findByText("Waiting for approval")).toBeInTheDocument();
+    expect(screen.getByText(/signed in as me@example.com/)).toBeInTheDocument();
+    expect(screen.getAllByText(first.kid)[0]).toBeInTheDocument();
+    expect(localRequest).not.toHaveBeenCalledWith(
+      "/api/trust",
+      expect.anything(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Compare and trust" }));
+    const trust = screen.getByRole("button", { name: "Trust public key" });
+    expect(trust).toBeDisabled();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /independently compared this exact fingerprint/,
+      }),
+    );
+    await user.click(trust);
+
+    await waitFor(() =>
+      expect(localRequest).toHaveBeenCalledWith(
+        "/api/trust",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const call = vi
+      .mocked(localRequest)
+      .mock.calls.find(([path]) => path === "/api/trust")!;
+    const body = JSON.parse(String(call[1]?.body));
+    expect(body).toMatchObject({
+      kid: first.kid,
+      public_key: first.public_key,
+      label: first.label,
+      compared: true,
+    });
+    expect(body.grants).toEqual(
+      expect.arrayContaining([
+        "history.read",
+        "session.write",
+        "session.start",
+        "browser_trust.manage",
+      ]),
+    );
+  });
+
+  it("shows nothing extra when every published key is already approved", async () => {
+    renderWithProviders(<LocalHostTrust />);
+    await waitFor(() =>
+      expect(localRequest).toHaveBeenCalledWith("/api/waiting-keys"),
+    );
+    expect(screen.queryByText("Waiting for approval")).not.toBeInTheDocument();
+  });
 });

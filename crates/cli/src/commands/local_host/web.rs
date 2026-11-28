@@ -245,6 +245,7 @@ pub(super) fn router(state: Arc<WebState>) -> Router {
         .route("/api/status", get(status))
         .route("/api/terminal/{id}", get(terminal))
         .route("/api/users", get(users))
+        .route("/api/waiting-keys", get(waiting_keys))
         .route("/api/trust", post(trust))
         .route("/api/trust/upgrade", post(upgrade_owner))
         .route("/api/machines", get(machine_pairing::list))
@@ -576,31 +577,98 @@ struct Search {
     #[serde(default)]
     q: String,
 }
+/// GET `path` (with `query`) on the server with the saved login. Only the
+/// parsed public fields leave this process; the saved login never does.
+async fn server_get<T: serde::de::DeserializeOwned>(
+    state: &WebState,
+    path: &str,
+    query: &[(&str, &str)],
+) -> Result<T> {
+    let cookie = crate::credentials::cookie_for(&state.server).context("no saved login")?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let mut url = reqwest::Url::parse(&format!("{}{path}", state.server))?;
+    url.query_pairs_mut().extend_pairs(query);
+    Ok(client
+        .get(url)
+        .header(reqwest::header::COOKIE, cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
 async fn users(State(state): State<Arc<WebState>>, Query(search): Query<Search>) -> Response {
     let result: Result<Value> = async {
         anyhow::ensure!(search.q.len() <= 200, "search too long");
-        let cookie = crate::credentials::cookie_for(&state.server).context("no saved login")?;
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(15))
-            .build()?;
-        let mut url = reqwest::Url::parse(&format!("{}/api/user-keys", state.server))?;
-        url.query_pairs_mut()
-            .append_pair("q", &search.q)
-            .append_pair("limit", "20");
-        let response = client
-            .get(url)
-            .header(reqwest::header::COOKIE, cookie)
-            .send()
-            .await?
-            .error_for_status()?;
-        // Only public directory fields leave this process; the saved login never does.
-        let directory: Directory = response.json().await?;
+        let directory: Directory = server_get(
+            &state,
+            "/api/user-keys",
+            &[("q", &search.q), ("limit", "20")],
+        )
+        .await?;
         Ok(serde_json::to_value(directory)?)
     }
     .await;
     match result { Ok(value) => Json(value).into_response(), Err(_) => error(StatusCode::BAD_GATEWAY,"Could not load published keys. Check your saved server login and that the server supports the key directory.") }
 }
+
+#[derive(Deserialize)]
+struct Me {
+    email: String,
+}
+
+/// Browser keys the saved login's own account published that this host has
+/// not approved (or has revoked). Listing one grants nothing: the owner still
+/// compares its fingerprint and approves it here.
+async fn waiting_keys(State(state): State<Arc<WebState>>) -> Response {
+    let result: Result<Value> = async {
+        let me: Me = server_get(&state, "/api/me", &[]).await?;
+        let directory: Directory = server_get(
+            &state,
+            "/api/user-keys",
+            &[("q", &me.email), ("limit", "20")],
+        )
+        .await?;
+        let keys = unapproved_own_keys(
+            directory,
+            &me.email,
+            &super::access_metadata::list(&state.dir)?,
+        );
+        Ok(json!({"email": me.email, "keys": keys}))
+    }
+    .await;
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(_) => error(
+            StatusCode::BAD_GATEWAY,
+            "Could not load your published browser keys. Check your saved server login.",
+        ),
+    }
+}
+/// Keys published by exactly `email` (the directory search is fuzzy) whose
+/// fingerprint has no active credential here.
+fn unapproved_own_keys(
+    directory: Directory,
+    email: &str,
+    credentials: &[conversations_core::private_channel::AccessCredential],
+) -> Vec<DirectoryKey> {
+    directory
+        .users
+        .into_iter()
+        .filter(|user| user.email == email)
+        .flat_map(|user| user.keys)
+        .filter(|key| {
+            !credentials
+                .iter()
+                .any(|credential| !credential.revoked && credential.kid == key.kid)
+        })
+        .collect()
+}
+
 #[derive(Deserialize, serde::Serialize)]
 struct Directory {
     users: Vec<DirectoryUser>,
@@ -777,6 +845,47 @@ mod tests {
     use ring::signature::KeyPair;
     use serde_json::{json, Value};
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn waiting_keys_are_your_own_published_keys_without_an_active_credential() {
+        let key = |kid: &str| DirectoryKey {
+            kid: kid.into(),
+            alg: "es256".into(),
+            public_key: "BB".into(),
+            label: kid.into(),
+            created_at: "2026-11-28T00:00:00Z".into(),
+        };
+        let credential =
+            |kid: &str, revoked| conversations_core::private_channel::AccessCredential {
+                kid: kid.into(),
+                label: kid.into(),
+                alg: "es256".into(),
+                kind: "owner".into(),
+                revoked,
+                grants: Vec::new(),
+            };
+        let directory = Directory {
+            users: vec![
+                DirectoryUser {
+                    email: "me@example.com".into(),
+                    display_name: None,
+                    keys: vec![key("approved"), key("revoked"), key("new")],
+                },
+                DirectoryUser {
+                    email: "me@example.com.evil".into(),
+                    display_name: None,
+                    keys: vec![key("lookalike")],
+                },
+            ],
+        };
+        let waiting = unapproved_own_keys(
+            directory,
+            "me@example.com",
+            &[credential("approved", false), credential("revoked", true)],
+        );
+        let kids: Vec<_> = waiting.iter().map(|key| key.kid.as_str()).collect();
+        assert_eq!(kids, ["revoked", "new"]);
+    }
 
     struct Fixture {
         _dir: tempfile::TempDir,

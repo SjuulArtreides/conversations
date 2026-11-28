@@ -32,7 +32,12 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState, Spinner } from "@/components/states";
 import { FullscreenPending } from "@/components/FullscreenPending";
-import { hostControl, HostControlError, unlockAgain } from "@/lib/hostControl";
+import {
+  hostControl,
+  HostControlError,
+  NOT_APPROVED_MESSAGE,
+  unlockAgain,
+} from "@/lib/hostControl";
 import {
   listSessions,
   withoutReadiness,
@@ -55,7 +60,7 @@ const REFRESH_MS = 5_000;
  * opened the page says so and shows nothing else.
  */
 const NOT_PAIRED = new HostControlError(
-  "Pair a host in Settings first: no host is trusted by this browser.",
+  NOT_APPROVED_MESSAGE,
   "not_paired",
 );
 

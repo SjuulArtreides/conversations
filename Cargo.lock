@@ -728,7 +728,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "conversations-cli"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "conversations-core"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "conversations-server"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "anyhow",
  "async-trait",
