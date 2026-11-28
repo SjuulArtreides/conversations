@@ -85,12 +85,12 @@ beforeEach(() => {
   vi.mocked(api.completeLive).mockResolvedValue(undefined);
 });
 
-function renderSession() {
+function renderSession(search = "?fullscreen=1") {
   return renderWithProviders(
     <Routes>
       <Route path="/sessions/:id" element={<SessionRoute />} />
     </Routes>,
-    { route: "/sessions/sess-1?fullscreen=1" },
+    { route: `/sessions/sess-1${search}` },
   );
 }
 
@@ -163,6 +163,35 @@ describe("restart through the session route", () => {
 });
 
 describe("graduating from the live view", () => {
+  it.each(["?fullscreen=1", ""])(
+    "switches to the first remaining live tab and preserves display mode (%j)",
+    async (search) => {
+      const nextSession = { id: "sess-2" } as LiveSession;
+      const lastSession = { id: "sess-3" } as LiveSession;
+      vi.mocked(api.liveOrder).mockResolvedValueOnce({
+        revision: 0,
+        session_ids: ["sess-1", "sess-2", "sess-3"],
+      }).mockResolvedValueOnce({
+        revision: 0,
+        session_ids: ["sess-2", "sess-3"],
+      });
+      vi.mocked(api.liveSessions)
+        .mockResolvedValueOnce([
+          { id: "sess-1" } as LiveSession,
+          lastSession,
+          nextSession,
+        ])
+        .mockResolvedValue([lastSession, nextSession]);
+      const { queryClient } = renderSession(search);
+      await screen.findByText("Terminal 1");
+
+      await queryClient.invalidateQueries({ queryKey: ["live-sessions"] });
+
+      await screen.findByText(`/sessions/sess-2${search}`);
+      expect(probes.stored).not.toHaveBeenCalled();
+    },
+  );
+
   it("refetches the stored session that was cached before the session went live", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
